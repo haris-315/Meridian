@@ -6,7 +6,7 @@ from typing import Dict, List, Literal, Optional, Any
 
 from dag import DAGBuilder, TaskNode, TaskStatus
 from scheduler import Scheduler
-from executor import TaskExecutor
+from executor import TaskExecutor, RufloExecutor, USE_RUFLO, is_ruflo_available
 from verifier import TaskVerifier
 from state import StateManager
 from checkpoint import Checkpoint
@@ -16,12 +16,23 @@ class Orchestrator:
     def __init__(self, working_dir: str = "."):
         self.working_dir = Path(working_dir)
         self.state = StateManager(str(self.working_dir / "orchestrator.db"))
-        self.executor = TaskExecutor(str(self.working_dir))
+        self.executor = self._make_executor()
         self.verifier = TaskVerifier(str(self.working_dir))
         self.dag: Dict[str, TaskNode] = {}
         self.scheduler: Optional[Scheduler] = None
         self.wave_number = 0
         self.start_time = time.time()
+
+    def _make_executor(self) -> TaskExecutor:
+        """Pick RufloExecutor when USE_RUFLO is enabled and the ruflo CLI is
+        actually on PATH; otherwise fall back to plain TaskExecutor and say why."""
+        if USE_RUFLO:
+            if is_ruflo_available():
+                print("[INFO] Ruflo CLI detected - using RufloExecutor")
+                return RufloExecutor(str(self.working_dir))
+            print("[WARN] USE_RUFLO is True but 'ruflo' CLI was not found on PATH; "
+                  "falling back to TaskExecutor", file=sys.stderr)
+        return TaskExecutor(str(self.working_dir))
 
     def build_dag(self, goal: str) -> None:
         """Build initial DAG from goal."""
@@ -49,7 +60,7 @@ class Orchestrator:
 
             task.status = TaskStatus.RUNNING
 
-            executor_result = self.executor.execute(task)
+            executor_result = self.executor.execute(task, self.wave_number)
             print(f"  Executor: {executor_result['result'][:100]}...")
 
             verifier_result = self._verify_task(task)

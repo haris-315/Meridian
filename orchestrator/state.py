@@ -1,8 +1,12 @@
 import sqlite3
+import subprocess
+import sys
 import json
 from datetime import datetime
 from typing import Optional, Dict, Any
 from pathlib import Path
+
+RUFLO_NAMESPACE = "meridian"
 
 
 class StateManager:
@@ -68,6 +72,45 @@ class StateManager:
 
         conn.commit()
         conn.close()
+
+        self._store_ruflo_memory(task_id, wave, description, executor_result, verifier_result, success)
+
+    def _store_ruflo_memory(
+        self,
+        task_id: str,
+        wave: int,
+        description: str,
+        executor_result: Dict[str, Any],
+        verifier_result: Dict[str, Any],
+        success: bool
+    ) -> None:
+        """Store a cross-wave summary of this verified task in Ruflo memory so
+        later waves' executor prompts can pull real context about what earlier
+        waves produced. Never raises — a memory outage must not block the
+        orchestrator loop, so failures are logged and swallowed."""
+        key = f"wave_{wave}_task_{task_id}"
+        summary = json.dumps({
+            'task_id': task_id,
+            'description': description,
+            'result': executor_result.get('result', ''),
+            'verified': success,
+            'verifier_output': (verifier_result.get('output') or '')[:500],
+            'cost_usd': executor_result.get('cost_usd', 0.0),
+        })
+
+        try:
+            proc = subprocess.run(
+                ["ruflo", "memory", "store", "--key", key, "--value", summary,
+                 "--namespace", RUFLO_NAMESPACE, "--upsert"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                stdin=subprocess.DEVNULL
+            )
+            if proc.returncode != 0:
+                print(f"[WARN] Ruflo memory store failed for '{key}': {proc.stderr.strip()}", file=sys.stderr)
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            print(f"[WARN] Ruflo memory store failed for '{key}': {e}", file=sys.stderr)
 
     def get_task_status(self, task_id: str) -> Optional[str]:
         """Get current status of a task."""

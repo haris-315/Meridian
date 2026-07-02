@@ -97,6 +97,58 @@
       "modelRoutedBy": "router",
       "provider": "anthropic",
       "currentTask": null
+    },
+    "agent-1782986868308-uc4f0w": {
+      "agentId": "agent-1782986868308-uc4f0w",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic"
+      },
+      "createdAt": "2026-07-02T10:07:48.308Z",
+      "model": "sonnet",
+      "modelRoutedBy": "default"
+    },
+    "agent-1782987148887-xjoak6": {
+      "agentId": "agent-1782987148887-xjoak6",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic"
+      },
+      "createdAt": "2026-07-02T10:12:28.887Z",
+      "model": "sonnet",
+      "modelRoutedBy": "default"
+    },
+    "agent-1782987172961-gj66h1": {
+      "agentId": "agent-1782987172961-gj66h1",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic"
+      },
+      "createdAt": "2026-07-02T10:12:52.961Z",
+      "model": "sonnet",
+      "modelRoutedBy": "default"
+    },
+    "agent-1782987191699-fsuoef": {
+      "agentId": "agent-1782987191699-fsuoef",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic"
+      },
+      "createdAt": "2026-07-02T10:13:11.699Z",
+      "model": "sonnet",
+      "modelRoutedBy": "default"
     }
   },
   "version": "3.0.0"

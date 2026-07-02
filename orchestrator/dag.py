@@ -1,6 +1,7 @@
 import json
+import subprocess
 from dataclasses import dataclass, field
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 from enum import Enum
 
 
@@ -29,19 +30,106 @@ class DAGBuilder:
         self.tasks: Dict[str, TaskNode] = {}
 
     def build_from_goal(self, goal: str) -> Dict[str, TaskNode]:
-        """Parse a plain text goal into tasks with implicit dependencies."""
-        lines = goal.strip().split('\n')
-        for i, line in enumerate(lines):
-            line = line.strip()
-            if line:
-                task_id = f"task_{i}"
-                deps = [f"task_{j}" for j in range(i)]
-                self.tasks[task_id] = TaskNode(
-                    id=task_id,
-                    description=line,
-                    dependencies=deps
-                )
-        self.detect_cycles()
+        """Decompose a plain text goal into a task DAG via a headless Claude call.
+        Falls back to a single task if decomposition fails for any reason."""
+        tasks_data = self._decompose_goal(goal)
+        if not tasks_data:
+            return self._single_task_fallback(goal)
+
+        self.tasks = {}
+        for task in tasks_data:
+            task_id = task['id']
+            self.tasks[task_id] = TaskNode(
+                id=task_id,
+                description=task['description'],
+                dependencies=task.get('dependencies', []),
+                verify_commands=task.get('verify_commands', [])
+            )
+
+        try:
+            self.detect_cycles()
+        except ValueError:
+            return self._single_task_fallback(goal)
+
+        return self.tasks
+
+    def _decompose_goal(self, goal: str) -> Optional[List[Dict]]:
+        """Call claude -p headlessly to break the goal into subtasks. Returns
+        None (never raises) if the call fails, times out, or the output can't
+        be parsed into a valid task list."""
+        prompt = self._build_decomposition_prompt(goal)
+
+        try:
+            result = subprocess.run(
+                ["claude", "-p", prompt, "--output-format", "json",
+                 "--permission-mode", "acceptEdits"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                stdin=subprocess.DEVNULL
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return None
+
+        if result.returncode != 0:
+            return None
+
+        try:
+            output = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+
+        raw = output.get("result", "")
+        return self._parse_task_list(raw)
+
+    def _parse_task_list(self, raw: str) -> Optional[List[Dict]]:
+        """Parse the JSON task list out of the model's text response, stripping
+        markdown code fences if present. Returns None if invalid."""
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(data, list) or len(data) < 2:
+            return None
+
+        for task in data:
+            if not isinstance(task, dict) or 'id' not in task or 'description' not in task:
+                return None
+
+        return data
+
+    def _build_decomposition_prompt(self, goal: str) -> str:
+        """Build the prompt instructing Claude to decompose the goal into a JSON task DAG."""
+        return f"""Break the following goal into 3-6 focused, independently executable subtasks.
+
+Goal: {goal}
+
+Rules:
+- Each subtask must be self-contained and describe one unit of work.
+- Only add a dependency between two tasks if one genuinely cannot start before the other finishes.
+- Tasks that can run in parallel must have NO dependency on each other.
+- "verify_commands" should contain real shell commands that verify this specific task's output
+  (e.g. "pytest test_file.py", "node file.js"). Use an empty list [] if no command applies.
+- Do not write, create, or modify any files. Only output the plan below.
+- Return ONLY valid JSON, no prose, no markdown fences, in exactly this format:
+[{{"id": "task_0", "description": "...", "dependencies": [], "verify_commands": []}}, ...]
+"""
+
+    def _single_task_fallback(self, goal: str) -> Dict[str, TaskNode]:
+        """Fallback: create a single task with the full goal as description."""
+        self.tasks = {
+            "task_0": TaskNode(id="task_0", description=goal.strip())
+        }
         return self.tasks
 
     def build_from_json(self, tasks_json: str) -> Dict[str, TaskNode]:
@@ -97,13 +185,13 @@ class DAGBuilder:
 
 
 if __name__ == "__main__":
-    # Test 1: Simple linear goal
+    # Test 1: LLM-powered decomposition of a single-line goal
     builder = DAGBuilder()
-    goal = "Create a function\nWrite tests\nRun tests"
+    goal = "build a Python calculator module with add, subtract, multiply and divide functions, plus a pytest test file"
     dag = builder.build_from_goal(goal)
-    print("Test 1 - Linear DAG:")
+    print("Test 1 - LLM-decomposed DAG:")
     for task_id, node in dag.items():
-        print(f"  {node.id}: {node.description} (deps: {node.dependencies})")
+        print(f"  {node.id}: {node.description} (deps: {node.dependencies}, verify: {node.verify_commands})")
 
     # Test 2: JSON DAG with explicit dependencies
     builder2 = DAGBuilder()
@@ -129,3 +217,10 @@ if __name__ == "__main__":
         print("  ERROR: Should have detected cycle!")
     except ValueError as e:
         print(f"  Correctly detected: {e}")
+
+    # Test 4: Fallback when decomposition is unusable
+    print("\nTest 4 - Single-task fallback:")
+    builder4 = DAGBuilder()
+    fallback_dag = builder4._single_task_fallback("some goal that could not be decomposed")
+    print(f"  Fallback tasks: {list(fallback_dag.keys())}")
+    print(f"  task_0 description: {fallback_dag['task_0'].description}")
