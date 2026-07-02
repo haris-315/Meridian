@@ -1,0 +1,103 @@
+{
+  "agents": {
+    "reviewer-dag": {
+      "agentId": "reviewer-dag",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 1,
+      "config": {},
+      "createdAt": "2026-07-02T09:08:32.485Z",
+      "domain": "dag.py",
+      "model": "sonnet",
+      "modelRoutedBy": "router",
+      "provider": "anthropic",
+      "currentTask": null
+    },
+    "reviewer-scheduler": {
+      "agentId": "reviewer-scheduler",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 1,
+      "config": {},
+      "createdAt": "2026-07-02T09:08:33.123Z",
+      "domain": "scheduler.py",
+      "model": "opus",
+      "modelRoutedBy": "router",
+      "provider": "anthropic",
+      "currentTask": null
+    },
+    "reviewer-executor": {
+      "agentId": "reviewer-executor",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 1,
+      "config": {},
+      "createdAt": "2026-07-02T09:08:33.799Z",
+      "domain": "executor.py",
+      "model": "sonnet",
+      "modelRoutedBy": "router",
+      "provider": "anthropic",
+      "currentTask": null
+    },
+    "reviewer-verifier": {
+      "agentId": "reviewer-verifier",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 1,
+      "config": {},
+      "createdAt": "2026-07-02T09:08:34.557Z",
+      "domain": "verifier.py",
+      "model": "sonnet",
+      "modelRoutedBy": "router",
+      "provider": "anthropic",
+      "currentTask": null
+    },
+    "reviewer-state": {
+      "agentId": "reviewer-state",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 1,
+      "config": {},
+      "createdAt": "2026-07-02T09:08:35.361Z",
+      "domain": "state.py",
+      "model": "sonnet",
+      "modelRoutedBy": "router",
+      "provider": "anthropic",
+      "currentTask": null
+    },
+    "reviewer-checkpoint": {
+      "agentId": "reviewer-checkpoint",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 1,
+      "config": {},
+      "createdAt": "2026-07-02T09:08:36.361Z",
+      "domain": "checkpoint.py",
+      "model": "sonnet",
+      "modelRoutedBy": "router",
+      "provider": "anthropic",
+      "currentTask": null
+    },
+    "reviewer-main": {
+      "agentId": "reviewer-main",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 1,
+      "config": {},
+      "createdAt": "2026-07-02T09:08:36.800Z",
+      "domain": "main.py",
+      "model": "opus",
+      "modelRoutedBy": "router",
+      "provider": "anthropic",
+      "currentTask": null
+    }
+  },
+  "version": "3.0.0"
+}
