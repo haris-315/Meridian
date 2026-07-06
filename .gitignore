@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Meridian per-project brain (created in whatever folder the orchestrator runs from)
+.meridian/
+
+# ruflo / claude-flow tool state and databases
+.swarm/
+.claude-flow/
+.claude/
+agentdb.rvf
+agentdb.rvf.lock
+ruvector.db
+
+# SQLite artifacts
+*.db
+*.db-shm
+*.db-wal
+
+# Demo output / scratch projects
+examples/
+node_modules/

@@ -11,6 +11,7 @@ class TaskStatus(Enum):
     RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 @dataclass
@@ -120,6 +121,9 @@ Rules:
 - Tasks that can run in parallel must have NO dependency on each other.
 - "verify_commands" should contain real shell commands that verify this specific task's output
   (e.g. "pytest test_file.py", "node file.js"). Use an empty list [] if no command applies.
+- verify_commands must invoke tools by their PATH name directly (e.g. "pytest x.py",
+  NOT "python -m pytest x.py") - module-style invocation breaks when the tool is
+  installed standalone rather than into the interpreter's site-packages.
 - Do not write, create, or modify any files. Only output the plan below.
 - Return ONLY valid JSON, no prose, no markdown fences, in exactly this format:
 [{{"id": "task_0", "description": "...", "dependencies": [], "verify_commands": []}}, ...]
