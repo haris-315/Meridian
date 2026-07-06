@@ -92,6 +92,14 @@ class StateManager:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dag_snapshot (
+                run_id INTEGER PRIMARY KEY,
+                dag_json TEXT,
+                updated_at TEXT
+            )
+        """)
+
         conn.commit()
         conn.close()
 
@@ -123,6 +131,34 @@ class StateManager:
         )
         conn.commit()
         conn.close()
+
+    # ----------------------------------------------------------- dag snapshot
+
+    def sync_dag(self, dag: Dict[str, Any]) -> None:
+        """Persist the full DAG (including tasks not yet executed) so the
+        dashboard can render pending/ready nodes and dependency edges - the
+        tasks table only ever contains executed attempts. `dag` is the live
+        {task_id: TaskNode} dict; statuses are read fresh each call."""
+        snapshot = [
+            {
+                'id': node.id,
+                'description': node.description,
+                'dependencies': list(node.dependencies),
+                'status': node.status.value,
+                'verify_commands': list(node.verify_commands),
+            }
+            for node in dag.values()
+        ]
+        try:
+            conn = self._connect()
+            conn.execute(
+                "INSERT OR REPLACE INTO dag_snapshot (run_id, dag_json, updated_at) VALUES (?, ?, ?)",
+                (self.run_id or 0, json.dumps(snapshot), _now()),
+            )
+            conn.commit()
+            conn.close()
+        except sqlite3.Error:
+            pass
 
     # --------------------------------------------------------------- events
 
@@ -442,9 +478,19 @@ class StateManager:
             }
             for r in cursor.fetchall()
         ]
+
+        cursor.execute("SELECT dag_json FROM dag_snapshot ORDER BY run_id DESC LIMIT 1")
+        dag_row = cursor.fetchone()
         conn.close()
 
-        return {'run': run, 'tasks': tasks, 'agents': agents, 'events': events}
+        dag = []
+        if dag_row and dag_row[0]:
+            try:
+                dag = json.loads(dag_row[0])
+            except json.JSONDecodeError:
+                dag = []
+
+        return {'run': run, 'tasks': tasks, 'agents': agents, 'events': events, 'dag': dag}
 
     def clear(self) -> None:
         """Clear all data (for testing)."""

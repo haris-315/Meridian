@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meridian — Orchestrator Dashboard</title>
+<style>
+  :root {
+    --page:          #f9f9f7;
+    --surface:       #fcfcfb;
+    --ink:           #0b0b0b;
+    --ink-2:         #52514e;
+    --muted:         #898781;
+    --hairline:      #e1e0d9;
+    --border:        rgba(11,11,11,0.10);
+    --good:          #0ca30c;
+    --good-text:     #006300;
+    --warning:       #fab219;
+    --serious:       #ec835a;
+    --critical:      #d03b3b;
+    --accent:        #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page:      #0d0d0d;
+      --surface:   #1a1a19;
+      --ink:       #ffffff;
+      --ink-2:     #c3c2b7;
+      --muted:     #898781;
+      --hairline:  #2c2c2a;
+      --border:    rgba(255,255,255,0.10);
+      --good-text: #0ca30c;
+      --accent:    #3987e5;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 20px;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+  header h1 { font-size: 19px; letter-spacing: 0.04em; }
+  header .proj { color: var(--muted); font-size: 12px; }
+  .pill {
+    font-size: 12px; padding: 2px 10px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--ink-2); background: var(--surface);
+  }
+  .controls { display: flex; gap: 8px; margin-bottom: 16px; }
+  .controls input {
+    flex: 1; padding: 9px 12px; font: inherit; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .controls button {
+    padding: 9px 18px; font: inherit; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--accent); color: #fff;
+  }
+  .controls button.stop { background: var(--surface); color: var(--critical); }
+  .controls button:disabled { opacity: 0.45; cursor: default; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .tile .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .tile .v { font-size: 26px; font-weight: 650; margin-top: 2px; }
+  .tile .s { font-size: 12px; color: var(--ink-2); }
+
+  .cols { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  section.panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  section.panel h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin-bottom: 10px;
+  }
+  .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+
+  .task {
+    border: 1px solid var(--hairline); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 8px;
+  }
+  .task .row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .task .tid { font-weight: 650; font-size: 13px; }
+  .task .desc { color: var(--ink-2); font-size: 13px; margin-top: 4px; }
+  .task .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .chip {
+    font-size: 11px; padding: 1px 8px; border-radius: 999px;
+    border: 1px solid var(--hairline); color: var(--muted);
+  }
+  .chip.dep-done { color: var(--good-text); }
+  .status { font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+  .st-done      { color: var(--good-text); }
+  .st-running   { color: var(--accent); }
+  .st-failed    { color: var(--critical); }
+  .st-retrying  { color: var(--warning); }
+  .st-skipped,
+  .st-pending,
+  .st-ready     { color: var(--muted); }
+  .st-verifying { color: var(--serious); }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  .live { animation: pulse 1.2s ease-in-out infinite; }
+
+  .agent { display: flex; gap: 8px; align-items: baseline; padding: 7px 2px; border-bottom: 1px solid var(--hairline); }
+  .agent:last-child { border-bottom: none; }
+  .agent .name { font-weight: 600; font-size: 13px; white-space: nowrap; }
+  .agent .det { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .swarm-line { font-size: 13px; color: var(--ink-2); padding: 3px 0; }
+
+  #log {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; height: 300px; overflow-y: auto;
+    font: 12px/1.6 ui-monospace, "Cascadia Code", Menlo, monospace;
+  }
+  #log .ln { display: flex; gap: 10px; }
+  #log .ts { color: var(--muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  #log .lv-warn  { color: var(--warning); }
+  #log .lv-error { color: var(--critical); }
+  #log .lv-info  { color: var(--ink-2); }
+  footer { color: var(--muted); font-size: 11px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MERIDIAN</h1>
+  <span class="pill" id="run-pill">no run yet</span>
+  <span class="proj" id="proj"></span>
+</header>
+
+<div class="controls">
+  <input id="goal" placeholder='Describe a goal, e.g. "build a calculator module with tests and a README"'>
+  <button id="start">Start run</button>
+  <button id="stop" class="stop" disabled>Stop</button>
+</div>
+
+<div class="tiles">
+  <div class="tile"><div class="k">Wave</div><div class="v" id="t-wave">–</div><div class="s" id="t-wave-s"></div></div>
+  <div class="tile"><div class="k">Tasks</div><div class="v" id="t-tasks">–</div><div class="s" id="t-tasks-s"></div></div>
+  <div class="tile"><div class="k">Agents active</div><div class="v" id="t-agents">–</div><div class="s" id="t-agents-s"></div></div>
+  <div class="tile"><div class="k">Cost</div><div class="v" id="t-cost">–</div><div class="s">USD, this run</div></div>
+</div>
+
+<div class="cols">
+  <div>
+    <section class="panel">
+      <h2>Task graph</h2>
+      <div id="dag"><div class="empty">Start a run to see the decomposed task DAG.</div></div>
+    </section>
+  </div>
+  <div>
+    <section class="panel">
+      <h2>Agents (this run)</h2>
+      <div id="agents"><div class="empty">No agents yet.</div></div>
+    </section>
+    <section class="panel">
+      <h2>Ruflo swarm ledger</h2>
+      <div id="swarm"><div class="empty">No swarm data yet.</div></div>
+    </section>
+  </div>
+</div>
+
+<section class="panel" style="padding:0; border:none; background:none;">
+  <h2 style="margin:0 0 8px 2px;">Live log</h2>
+  <div id="log"></div>
+</section>
+
+<footer>Meridian orchestrator — goal → DAG → parallel waves → independent verification. State read live from the project's <code>.meridian/</code> brain.</footer>
+
+<script>
+const STATUS_GLYPH = {
+  pending:  ['○', 'pending'],  ready:    ['◎', 'ready'],
+  running:  ['◐', 'running'],  done:     ['✓', 'done'],
+  failed:   ['✕', 'failed'],   skipped:  ['⊘', 'skipped'],
+  retrying: ['↻', 'retrying'], spawning: ['◌', 'spawning'],
+  executed: ['◑', 'executed'], errored:  ['✕', 'errored'],
+  verifying:['⚑', 'verifying'],
+};
+const $ = id => document.getElementById(id);
+let lastEventId = 0;
+let logPinned = true;
+
+function statusSpan(status, live) {
+  const [glyph, label] = STATUS_GLYPH[status] || ['?', status];
+  const cls = 'st-' + (status in STATUS_GLYPH ? statusClass(status) : 'pending');
+  return `<span class="status ${cls}${live ? ' live' : ''}">${glyph} ${label}</span>`;
+}
+function statusClass(s) {
+  if (['running','spawning','executed'].includes(s)) return 'running';
+  if (s === 'done') return 'done';
+  if (['failed','errored'].includes(s)) return 'failed';
+  if (s === 'retrying') return 'retrying';
+  if (s === 'verifying') return 'verifying';
+  return 'pending';
+}
+const esc = s => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function render(data) {
+  $('proj').textContent = data.project_dir || '';
+  const run = data.run, runner = data.runner || {};
+  const pill = $('run-pill');
+  if (runner.running) { pill.textContent = '● running — ' + (runner.goal || run?.goal || ''); }
+  else if (run) { pill.textContent = run.status + ' — ' + run.goal; }
+  else { pill.textContent = 'no run yet'; }
+  $('start').disabled = !!runner.running;
+  $('stop').disabled = !runner.running;
+
+  const dag = data.dag || [];
+  const tasksById = {}; (data.tasks || []).forEach(t => tasksById[t.task_id] = t);
+
+  const waves = (data.tasks || []).map(t => t.wave || 0);
+  $('t-wave').textContent = waves.length ? Math.max(...waves) : '–';
+  $('t-wave-s').textContent = runner.running ? 'in progress' : (run ? 'final' : '');
+
+  const doneCount = dag.filter(n => n.status === 'done').length;
+  $('t-tasks').textContent = dag.length ? `${doneCount}/${dag.length}` : '–';
+  $('t-tasks-s').textContent = dag.length ? 'done / total' : '';
+
+  const agents = data.agents || [];
+  const activeAgents = agents.filter(a => ['spawning','running','verifying','executed'].includes(a.status));
+  $('t-agents').textContent = agents.length ? String(activeAgents.length) : '–';
+  $('t-agents-s').textContent = agents.length ? `${agents.length} spawned total` : '';
+
+  let cost = 0; (data.tasks || []).forEach(t => cost += (t.cost_usd || 0));
+  $('t-cost').textContent = '$' + cost.toFixed(4);
+
+  if (dag.length) {
+    $('dag').innerHTML = dag.map(n => {
+      const t = tasksById[n.id];
+      const live = ['running','ready'].includes(n.status) && runner.running;
+      const deps = (n.dependencies || []).map(d => {
+        const ds = (dag.find(x => x.id === d) || {}).status;
+        return `<span class="chip${ds === 'done' ? ' dep-done' : ''}">needs ${esc(d)}${ds === 'done' ? ' ✓' : ''}</span>`;
+      }).join('');
+      const extra = t ? `<span class="chip">wave ${t.wave}</span>` +
+        (t.retry_count ? `<span class="chip">retries: ${t.retry_count}</span>` : '') +
+        `<span class="chip">$${(t.cost_usd || 0).toFixed(3)}</span>` : '';
+      return `<div class="task">
+        <div class="row1"><span class="tid">${esc(n.id)}</span>${statusSpan(n.status, live)}</div>
+        <div class="desc">${esc(n.description)}</div>
+        <div class="meta">${deps}${extra}</div>
+      </div>`;
+    }).join('');
+  }
+
+  if (agents.length) {
+    $('agents').innerHTML = agents.slice().reverse().map(a => {
+      const live = ['spawning','running','verifying'].includes(a.status) && runner.running;
+      return `<div class="agent">
+        <span class="name">w${a.wave}·${esc(a.task_id)}</span>
+        ${statusSpan(a.status, live)}
+        <span class="det">${esc(a.detail || '')}</span>
+      </div>`;
+    }).join('');
+  }
+
+  const swarm = data.swarm || {};
+  if (swarm.total_agents) {
+    const byStatus = {};
+    (swarm.agents || []).forEach(a => byStatus[a.status] = (byStatus[a.status] || 0) + 1);
+    $('swarm').innerHTML =
+      `<div class="swarm-line"><strong>${swarm.total_agents}</strong> coordination agents registered in this project's brain</div>` +
+      Object.entries(byStatus).map(([s, n]) => `<div class="swarm-line">· ${n} ${esc(s)}</div>`).join('') +
+      (swarm.agents || []).slice(-5).reverse().map(a =>
+        `<div class="swarm-line" style="font-size:12px;color:var(--muted)">${esc(a.name || a.id || '?')} (${esc(a.type || '')})</div>`).join('');
+  }
+
+  (data.events || []).forEach(e => {
+    lastEventId = Math.max(lastEventId, e.event_id);
+    const ts = (e.ts || '').slice(11, 19);
+    const div = document.createElement('div');
+    div.className = 'ln';
+    div.innerHTML = `<span class="ts">${ts}</span><span class="lv-${esc(e.level)}">${esc(e.message)}</span>`;
+    $('log').appendChild(div);
+  });
+  if ((data.events || []).length && logPinned) $('log').scrollTop = $('log').scrollHeight;
+}
+
+$('log').addEventListener('scroll', () => {
+  const el = $('log');
+  logPinned = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+});
+
+async function poll() {
+  try {
+    const r = await fetch('/api/state?after=' + lastEventId);
+    render(await r.json());
+  } catch (e) { $('run-pill').textContent = 'server unreachable'; }
+}
+
+$('start').onclick = async () => {
+  const goal = $('goal').value.trim();
+  if (!goal) { $('goal').focus(); return; }
+  $('start').disabled = true;
+  const r = await fetch('/api/run', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                                      body: JSON.stringify({ goal }) });
+  const res = await r.json();
+  if (!res.ok) { alert(res.error); $('start').disabled = false; }
+  poll();
+};
+$('stop').onclick = async () => {
+  if (!confirm('Terminate the running orchestration?')) return;
+  await fetch('/api/stop', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+  poll();
+};
+
+poll();
+setInterval(poll, 1500);
+</script>
+</body>
+</html>

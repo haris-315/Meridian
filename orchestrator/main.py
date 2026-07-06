@@ -69,6 +69,7 @@ class Orchestrator:
         for task_id, node in self.dag.items():
             deps = ", ".join(node.dependencies) if node.dependencies else "none"
             self._log("info", f"  {task_id}: {node.description[:120]} (deps: {deps})")
+        self.state.sync_dag(self.dag)
 
     def _print_dag_state(self, ready_ids: List[str]) -> None:
         """Print the full DAG state and ready queue at the start of every wave,
@@ -98,6 +99,7 @@ class Orchestrator:
         ready_tasks = [self.dag[task_id] for task_id in ready_ids]
         for task in ready_tasks:
             task.status = TaskStatus.RUNNING
+        self.state.sync_dag(self.dag)
 
         executor_results = self.executor.execute_wave(ready_tasks, self.wave_number)
 
@@ -153,6 +155,7 @@ class Orchestrator:
 
         self.state.write_wave_summary_memory(self.wave_number)
         self.scheduler.re_score()
+        self.state.sync_dag(self.dag)
         return executed
 
     def _handle_task_failure(self, task: TaskNode, rate_limited: bool = False) -> None:
@@ -252,6 +255,7 @@ class Orchestrator:
         for task_id in to_skip:
             self.dag[task_id].status = TaskStatus.SKIPPED
         self.scheduler.re_score()
+        self.state.sync_dag(self.dag)
 
     def run_loop(self, allow_escalation: bool = True) -> None:
         """Main orchestration loop: fully autonomous wave-to-wave, no per-wave
