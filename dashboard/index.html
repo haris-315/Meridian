@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Meridian — Orchestrator Dashboard</title>
+<title>Meridian — Orchestrator Hub</title>
 <style>
   :root {
     --page:          #f9f9f7;
@@ -42,25 +42,106 @@
     max-width: 1240px;
     margin: 0 auto;
   }
-  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
-  header h1 { font-size: 19px; letter-spacing: 0.04em; }
-  header .proj { color: var(--muted); font-size: 12px; }
-  .pill {
-    font-size: 12px; padding: 2px 10px; border-radius: 999px;
-    border: 1px solid var(--border); color: var(--ink-2); background: var(--surface);
+  a { color: var(--accent); }
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--border);
   }
+  input {
+    font: inherit; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px;
+  }
+  .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+  section.panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  section.panel h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin-bottom: 10px;
+  }
+  .chip {
+    font-size: 11px; padding: 1px 8px; border-radius: 999px;
+    border: 1px solid var(--hairline); color: var(--muted);
+  }
+
+  /* ---------- top bar (shared) ---------- */
+  .topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .topbar h1 { font-size: 18px; letter-spacing: 0.05em; cursor: pointer; }
+  .topbar .crumb { color: var(--muted); font-size: 13px; }
+  .topbar .crumb b { color: var(--ink); font-weight: 600; }
+  .topbar .spacer { flex: 1; }
+  .btn-ghost { background: none; padding: 6px 12px; font-size: 13px; color: var(--ink-2); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---------- hub view ---------- */
+  #hub-view { display: none; }
+  .hub-actions { display: flex; gap: 10px; margin-bottom: 22px; flex-wrap: wrap; }
+  .hub-actions button {
+    padding: 10px 18px; font-weight: 600; background: var(--accent); color: #fff; border: none;
+  }
+  .hub-actions button.secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--border); }
+  .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .project-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; cursor: pointer; transition: border-color 0.15s;
+  }
+  .project-card:hover { border-color: var(--accent); }
+  .project-card .name { font-weight: 650; font-size: 15px; margin-bottom: 4px; }
+  .project-card .path {
+    font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 10px;
+  }
+  .project-card .meta-row { display: flex; justify-content: space-between; align-items: center; }
+  .project-card .opened { font-size: 11px; color: var(--muted); }
+  .project-card .forget { background: none; border: none; color: var(--muted); font-size: 11px; padding: 2px 6px; }
+  .project-card .forget:hover { color: var(--critical); }
+  .running-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 5px; }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  .running-dot.live { animation: pulse 1.2s ease-in-out infinite; }
+
+  .modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    align-items: center; justify-content: center; z-index: 10;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 22px; width: 420px; max-width: 92vw;
+  }
+  .modal h3 { font-size: 15px; margin-bottom: 14px; }
+  .modal label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 5px; }
+  .modal input { width: 100%; }
+  .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .modal .actions button { padding: 8px 16px; }
+  .modal .error { color: var(--critical); font-size: 12px; margin-top: 8px; }
+
+  /* ---------- project view ---------- */
+  #project-view { display: none; }
+  .phase-banner {
+    display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--border); margin-bottom: 16px; font-size: 14px;
+  }
+  .phase-banner .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .phase-idle    .dot { background: var(--muted); }
+  .phase-running .dot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+  .phase-done    .dot { background: var(--good-text); }
+  .phase-stalled .dot { background: var(--critical); }
+  .phase-banner .label { font-weight: 600; }
+  .phase-banner .detail { color: var(--ink-2); }
+
   .controls { display: flex; gap: 8px; margin-bottom: 16px; }
-  .controls input {
-    flex: 1; padding: 9px 12px; font: inherit; color: var(--ink);
-    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  }
+  .controls input { flex: 1; }
   .controls button {
-    padding: 9px 18px; font: inherit; font-weight: 600; cursor: pointer;
-    border: 1px solid var(--border); border-radius: 8px;
-    background: var(--accent); color: #fff;
+    padding: 9px 18px; font-weight: 600; background: var(--accent); color: #fff; border: none;
   }
-  .controls button.stop { background: var(--surface); color: var(--critical); }
+  .controls button.stop { background: var(--surface); color: var(--critical); border: 1px solid var(--border); }
   .controls button:disabled { opacity: 0.45; cursor: default; }
+
+  .view-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .view-tab {
+    padding: 6px 14px; font-size: 13px; background: none; border: 1px solid var(--hairline); color: var(--ink-2);
+  }
+  .view-tab.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
   .tile {
@@ -73,15 +154,6 @@
 
   .cols { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; align-items: start; }
   @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
-  section.panel {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-    padding: 14px; margin-bottom: 12px;
-  }
-  section.panel h2 {
-    font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--muted); margin-bottom: 10px;
-  }
-  .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
 
   .task {
     border: 1px solid var(--hairline); border-radius: 8px;
@@ -91,10 +163,6 @@
   .task .tid { font-weight: 650; font-size: 13px; }
   .task .desc { color: var(--ink-2); font-size: 13px; margin-top: 4px; }
   .task .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-  .chip {
-    font-size: 11px; padding: 1px 8px; border-radius: 999px;
-    border: 1px solid var(--hairline); color: var(--muted);
-  }
   .chip.dep-done { color: var(--good-text); }
   .confidence { font-size: 11px; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
   .conf-high { color: var(--good-text); border: 1px solid var(--good-text); }
@@ -111,7 +179,6 @@
   .st-pending,
   .st-ready     { color: var(--muted); }
   .st-verifying { color: var(--serious); }
-  @keyframes pulse { 50% { opacity: 0.35; } }
   .live { animation: pulse 1.2s ease-in-out infinite; }
 
   .agent { display: flex; gap: 8px; align-items: baseline; padding: 7px 2px; border-bottom: 1px solid var(--hairline); }
@@ -123,8 +190,8 @@
 
   .thought-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
   .thought-tab {
-    font-size: 12px; padding: 4px 12px; border-radius: 999px; cursor: pointer;
-    border: 1px solid var(--hairline); color: var(--ink-2); background: none;
+    font-size: 12px; padding: 4px 12px; border-radius: 999px; background: none;
+    border: 1px solid var(--hairline); color: var(--ink-2);
   }
   .thought-tab.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
   #thoughts {
@@ -150,7 +217,7 @@
 
   #log {
     background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-    padding: 12px 14px; height: 300px; overflow-y: auto;
+    padding: 12px 14px; height: 260px; overflow-y: auto;
     font: 12px/1.6 ui-monospace, "Cascadia Code", Menlo, monospace;
   }
   #log .ln { display: flex; gap: 10px; }
@@ -158,63 +225,153 @@
   #log .lv-warn  { color: var(--warning); }
   #log .lv-error { color: var(--critical); }
   #log .lv-info  { color: var(--ink-2); }
+
+  /* ---------- history tab ---------- */
+  .run-row {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--hairline); margin-bottom: 8px; cursor: pointer;
+  }
+  .run-row:hover { border-color: var(--accent); }
+  .run-row .rid { font-weight: 650; font-size: 12px; color: var(--muted); width: 30px; }
+  .run-row .goal { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-row .when { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .inspect-banner {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-bottom: 14px;
+    background: rgba(42,120,214,0.08); border: 1px solid var(--accent); border-radius: 8px; font-size: 13px;
+  }
+  .inspect-banner button { margin-left: auto; padding: 4px 12px; font-size: 12px; background: none; }
+
   footer { color: var(--muted); font-size: 11px; margin-top: 14px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>MERIDIAN</h1>
-  <span class="pill" id="run-pill">no run yet</span>
-  <span class="proj" id="proj"></span>
-</header>
 
-<div class="controls">
-  <input id="goal" placeholder='Describe a goal, e.g. "build a calculator module with tests and a README"'>
-  <button id="start">Start run</button>
-  <button id="stop" class="stop" disabled>Stop</button>
+<div class="topbar">
+  <h1 id="brand">MERIDIAN</h1>
+  <span class="crumb" id="crumb"></span>
+  <div class="spacer"></div>
+  <button class="btn-ghost" id="back-to-hub" style="display:none;">← All projects</button>
 </div>
 
-<div class="tiles">
-  <div class="tile"><div class="k">Wave</div><div class="v" id="t-wave">–</div><div class="s" id="t-wave-s"></div></div>
-  <div class="tile"><div class="k">Tasks</div><div class="v" id="t-tasks">–</div><div class="s" id="t-tasks-s"></div></div>
-  <div class="tile"><div class="k">Agents active</div><div class="v" id="t-agents">–</div><div class="s" id="t-agents-s"></div></div>
-  <div class="tile"><div class="k">Cost</div><div class="v" id="t-cost">–</div><div class="s">USD, this run</div></div>
-</div>
-
-<div class="cols">
-  <div>
-    <section class="panel">
-      <h2>Task graph</h2>
-      <div id="dag"><div class="empty">Start a run to see the decomposed task DAG.</div></div>
-    </section>
+<!-- ============================== HUB VIEW ============================== -->
+<div id="hub-view">
+  <div class="hub-actions">
+    <button id="open-existing-btn">Open folder…</button>
+    <button class="secondary" id="new-project-btn">New project…</button>
   </div>
-  <div>
-    <section class="panel">
-      <h2>Agents (this run)</h2>
-      <div id="agents"><div class="empty">No agents yet.</div></div>
-    </section>
-    <section class="panel">
-      <h2>Ruflo swarm ledger</h2>
-      <div id="swarm"><div class="empty">No swarm data yet.</div></div>
-    </section>
+  <div id="project-grid" class="project-grid">
+    <div class="empty">No projects yet. Open an existing folder or scaffold a new one to get started.</div>
   </div>
 </div>
 
-<section class="panel">
-  <h2>Agent thinking (select a task to follow its live reasoning)</h2>
-  <div id="thought-tabs" class="thought-tabs"></div>
-  <div id="thoughts"><div class="empty">Start a run and pick a task above to see its live thought stream.</div></div>
-</section>
+<!-- modal: open existing -->
+<div class="modal-backdrop" id="open-modal">
+  <div class="modal">
+    <h3>Open an existing project</h3>
+    <label>Folder path</label>
+    <input id="open-path" placeholder="/home/you/projects/my-app">
+    <label>Display name (optional)</label>
+    <input id="open-name" placeholder="My App">
+    <div class="error" id="open-error"></div>
+    <div class="actions">
+      <button class="btn-ghost" data-close>Cancel</button>
+      <button id="open-confirm" style="background:var(--accent);color:#fff;border:none;">Open</button>
+    </div>
+  </div>
+</div>
 
-<section class="panel" style="padding:0; border:none; background:none;">
-  <h2 style="margin:0 0 8px 2px;">Live log</h2>
-  <div id="log"></div>
+<!-- modal: scaffold new -->
+<div class="modal-backdrop" id="new-modal">
+  <div class="modal">
+    <h3>Scaffold a new project</h3>
+    <label>Project name</label>
+    <input id="new-name" placeholder="My App">
+    <label>Folder path (will be created)</label>
+    <input id="new-path" placeholder="/home/you/projects/my-app">
+    <div class="error" id="new-error"></div>
+    <div class="actions">
+      <button class="btn-ghost" data-close>Cancel</button>
+      <button id="new-confirm" style="background:var(--accent);color:#fff;border:none;">Create</button>
+    </div>
+  </div>
+</div>
 
-</section>
+<!-- ============================== PROJECT VIEW ============================== -->
+<div id="project-view">
 
-<footer>Meridian orchestrator — goal → DAG → parallel waves → independent verification. State read live from the project's <code>.meridian/</code> brain.</footer>
+  <div class="phase-banner phase-idle" id="phase-banner">
+    <span class="dot"></span>
+    <span class="label" id="phase-label">Idle</span>
+    <span class="detail" id="phase-detail"></span>
+  </div>
+
+  <div class="controls">
+    <input id="goal" placeholder='Describe a goal, e.g. "build a calculator module with tests and a README"'>
+    <button id="start">Start run</button>
+    <button id="stop" class="stop" disabled>Stop</button>
+  </div>
+
+  <div class="view-tabs">
+    <button class="view-tab active" data-tab="live">Live</button>
+    <button class="view-tab" data-tab="history">Run history</button>
+  </div>
+
+  <div id="inspect-banner-wrap"></div>
+
+  <div id="live-tab">
+    <div class="tiles">
+      <div class="tile"><div class="k">Wave</div><div class="v" id="t-wave">–</div><div class="s" id="t-wave-s"></div></div>
+      <div class="tile"><div class="k">Tasks</div><div class="v" id="t-tasks">–</div><div class="s" id="t-tasks-s"></div></div>
+      <div class="tile"><div class="k">Agents active</div><div class="v" id="t-agents">–</div><div class="s" id="t-agents-s"></div></div>
+      <div class="tile"><div class="k">Cost</div><div class="v" id="t-cost">–</div><div class="s">USD, this run</div></div>
+    </div>
+
+    <div class="cols">
+      <div>
+        <section class="panel">
+          <h2>Task graph</h2>
+          <div id="dag"><div class="empty">Start a run to see the decomposed task DAG.</div></div>
+        </section>
+      </div>
+      <div>
+        <section class="panel">
+          <h2>Agents</h2>
+          <div id="agents"><div class="empty">No agents yet.</div></div>
+        </section>
+        <section class="panel">
+          <h2>Ruflo swarm ledger</h2>
+          <div id="swarm"><div class="empty">No swarm data yet.</div></div>
+        </section>
+      </div>
+    </div>
+
+    <section class="panel">
+      <h2>Agent thinking (select a task to follow its reasoning)</h2>
+      <div id="thought-tabs" class="thought-tabs"></div>
+      <div id="thoughts"><div class="empty">Pick a task above to see its thought stream.</div></div>
+    </section>
+
+    <section class="panel" style="padding:0; border:none; background:none;">
+      <h2 style="margin:0 0 8px 2px;">Log</h2>
+      <div id="log"></div>
+    </section>
+  </div>
+
+  <div id="history-tab" style="display:none;">
+    <section class="panel">
+      <h2>All runs</h2>
+      <div id="run-list"><div class="empty">No runs yet.</div></div>
+    </section>
+  </div>
+
+</div>
+
+<footer>Meridian orchestrator — goal → DAG → parallel waves → independent verification.</footer>
 
 <script>
+const $ = id => document.getElementById(id);
+const esc = s => (s || '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
 const STATUS_GLYPH = {
   pending:  ['○', 'pending'],  ready:    ['◎', 'ready'],
   running:  ['◐', 'running'],  done:     ['✓', 'done'],
@@ -223,11 +380,16 @@ const STATUS_GLYPH = {
   executed: ['◑', 'executed'], errored:  ['✕', 'errored'],
   verifying:['⚑', 'verifying'],
 };
-const $ = id => document.getElementById(id);
+const THOUGHT_KIND_LABEL = { thinking: 'thinking', tool_use: 'tool', text: 'says' };
+
+// ---------------------------------------------------------------- state
+let currentProject = null;   // {id, name, path}
+let currentTab = 'live';     // 'live' | 'history'
+let inspectingRunId = null;  // set when viewing a historical run (read-only)
 let lastEventId = 0;
 let logPinned = true;
 let selectedThoughtTask = null;
-const THOUGHT_KIND_LABEL = { thinking: 'thinking', tool_use: 'tool', text: 'says' };
+let pollTimer = null;
 
 function statusSpan(status, live) {
   const [glyph, label] = STATUS_GLYPH[status] || ['?', status];
@@ -242,17 +404,235 @@ function statusClass(s) {
   if (s === 'verifying') return 'verifying';
   return 'pending';
 }
-const esc = s => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-function render(data) {
-  $('proj').textContent = data.project_dir || '';
+// ==================================================================
+// HUB VIEW
+// ==================================================================
+function showHub() {
+  currentProject = null;
+  stopPolling();
+  $('hub-view').style.display = 'block';
+  $('project-view').style.display = 'none';
+  $('back-to-hub').style.display = 'none';
+  $('crumb').textContent = '';
+  loadProjects();
+}
+
+async function loadProjects() {
+  const res = await fetch('/api/hub/projects');
+  const data = await res.json();
+  const grid = $('project-grid');
+  if (!data.projects.length) {
+    grid.innerHTML = '<div class="empty">No projects yet. Open an existing folder or scaffold a new one to get started.</div>';
+    return;
+  }
+  grid.innerHTML = data.projects.map(p => {
+    const running = p.runner && p.runner.running;
+    const opened = p.last_opened_at ? new Date(p.last_opened_at).toLocaleString() : '';
+    return `<div class="project-card" data-id="${esc(p.id)}">
+      <div class="name">${running ? `<span class="running-dot live"></span>` : ''}${esc(p.name)}</div>
+      <div class="path">${esc(p.path)}</div>
+      <div class="meta-row">
+        <span class="opened">opened ${esc(opened)}</span>
+        <button class="forget" data-forget="${esc(p.id)}">forget</button>
+      </div>
+    </div>`;
+  }).join('');
+  grid.querySelectorAll('.project-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.dataset.forget) return;
+      openProject(card.dataset.id);
+    });
+  });
+  grid.querySelectorAll('[data-forget]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await fetch('/api/hub/projects/' + btn.dataset.forget, { method: 'DELETE' });
+      loadProjects();
+    });
+  });
+}
+
+function openModal(id) { $(id).classList.add('open'); }
+function closeModal(id) { $(id).classList.remove('open'); }
+document.querySelectorAll('[data-close]').forEach(btn => {
+  btn.addEventListener('click', () => btn.closest('.modal-backdrop').classList.remove('open'));
+});
+
+$('open-existing-btn').onclick = () => { $('open-error').textContent = ''; openModal('open-modal'); };
+$('new-project-btn').onclick = () => { $('new-error').textContent = ''; openModal('new-modal'); };
+
+$('open-confirm').onclick = async () => {
+  const path = $('open-path').value.trim();
+  const name = $('open-name').value.trim();
+  if (!path) { $('open-error').textContent = 'Path is required.'; return; }
+  const res = await fetch('/api/hub/projects', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ path, name: name || null }),
+  });
+  const data = await res.json();
+  if (!res.ok) { $('open-error').textContent = data.detail || data.error || 'Failed to open project.'; return; }
+  closeModal('open-modal');
+  $('open-path').value = ''; $('open-name').value = '';
+  openProject(data.id);
+};
+
+$('new-confirm').onclick = async () => {
+  const name = $('new-name').value.trim();
+  const path = $('new-path').value.trim();
+  if (!name || !path) { $('new-error').textContent = 'Name and path are both required.'; return; }
+  const res = await fetch('/api/hub/scaffold', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name, path }),
+  });
+  const data = await res.json();
+  if (!res.ok) { $('new-error').textContent = data.detail || data.error || 'Failed to create project.'; return; }
+  closeModal('new-modal');
+  $('new-name').value = ''; $('new-path').value = '';
+  openProject(data.id);
+};
+
+$('brand').onclick = showHub;
+$('back-to-hub').onclick = showHub;
+
+// ==================================================================
+// PROJECT VIEW
+// ==================================================================
+async function openProject(id) {
+  const res = await fetch('/api/hub/projects');
+  const data = await res.json();
+  const proj = data.projects.find(p => p.id === id);
+  if (!proj) { showHub(); return; }
+  currentProject = proj;
+  inspectingRunId = null;
+  lastEventId = 0;
+  selectedThoughtTask = null;
+
+  $('hub-view').style.display = 'none';
+  $('project-view').style.display = 'block';
+  $('back-to-hub').style.display = 'inline-block';
+  $('crumb').innerHTML = `/ <b>${esc(proj.name)}</b>`;
+
+  switchTab('live');
+  $('log').innerHTML = '';
+  startPolling();
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.view-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  $('live-tab').style.display = tab === 'live' ? 'block' : 'none';
+  $('history-tab').style.display = tab === 'history' ? 'block' : 'none';
+  if (tab === 'history') loadRunHistory();
+}
+document.querySelectorAll('.view-tab').forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+
+function startPolling() {
+  stopPolling();
+  poll();
+  pollTimer = setInterval(poll, 1500);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function poll() {
+  if (!currentProject || currentTab !== 'live' || inspectingRunId) return;
+  try {
+    const r = await fetch(`/api/projects/${currentProject.id}/state?after=${lastEventId}`);
+    render(await r.json(), false);
+  } catch (e) { setPhase('stalled', 'Server unreachable', ''); }
+}
+
+// ------------------------------------------------------------ run history
+
+async function loadRunHistory() {
+  const res = await fetch(`/api/projects/${currentProject.id}/runs`);
+  const data = await res.json();
+  const list = $('run-list');
+  if (!data.runs.length) { list.innerHTML = '<div class="empty">No runs yet.</div>'; return; }
+  list.innerHTML = data.runs.map(r => {
+    const when = r.finished_at ? new Date(r.finished_at).toLocaleString() : new Date(r.started_at).toLocaleString();
+    return `<div class="run-row" data-run="${r.run_id}">
+      <span class="rid">#${r.run_id}</span>
+      <span class="goal">${esc(r.goal)}</span>
+      ${statusSpan(r.status === 'complete' ? 'done' : r.status === 'failed' ? 'failed' : r.status, false)}
+      <span class="chip">$${(r.total_cost_usd || 0).toFixed(3)}</span>
+      <span class="when">${esc(when)}</span>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.run-row').forEach(row => {
+    row.addEventListener('click', () => inspectRun(parseInt(row.dataset.run, 10)));
+  });
+}
+
+async function inspectRun(runId) {
+  inspectingRunId = runId;
+  const res = await fetch(`/api/projects/${currentProject.id}/runs/${runId}`);
+  const data = await res.json();
+  switchTab('live');
+  $('log').innerHTML = '';
+  lastEventId = 0;
+  render(data, true);
+}
+
+function renderInspectBanner() {
+  const wrap = $('inspect-banner-wrap');
+  if (!inspectingRunId) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = `<div class="inspect-banner">
+    Viewing historical run #${inspectingRunId} (read-only) - not the live run.
+    <button id="exit-inspect">Back to live</button>
+  </div>`;
+  $('exit-inspect').onclick = () => {
+    inspectingRunId = null;
+    lastEventId = 0;
+    $('log').innerHTML = '';
+    renderInspectBanner();
+    poll();
+  };
+}
+
+// ------------------------------------------------------------ phase banner
+
+function setPhase(kind, label, detail) {
+  const banner = $('phase-banner');
+  banner.className = 'phase-banner phase-' + kind;
+  $('phase-label').textContent = label;
+  $('phase-detail').textContent = detail;
+}
+
+function computePhase(data) {
+  const runner = data.runner || {};
+  const run = data.run;
+  const dag = data.dag || [];
+  if (inspectingRunId) {
+    return ['done', `Run #${inspectingRunId}`, run ? `${run.status} — ${run.goal}` : ''];
+  }
+  if (runner.running) {
+    if (!dag.length) return ['running', 'Planning', 'decomposing the goal into a task DAG…'];
+    const done = dag.filter(n => n.status === 'done').length;
+    const waves = (data.tasks || []).map(t => t.wave || 0);
+    const wave = waves.length ? Math.max(...waves) : 1;
+    return ['running', `Wave ${wave} in progress`, `${done}/${dag.length} tasks done so far`];
+  }
+  if (!run) return ['idle', 'Idle', 'describe a goal below to begin'];
+  if (run.status === 'complete') return ['done', 'Complete', `${run.goal} — $${(run.total_cost_usd || 0).toFixed(4)}`];
+  if (run.status === 'stalled') return ['stalled', 'Stalled', 'needs a look — check the log below'];
+  if (run.status === 'stopped') return ['idle', 'Stopped', 'stopped by user'];
+  return ['idle', run.status, run.goal || ''];
+}
+
+// ------------------------------------------------------------ main render
+
+function render(data, isHistorical) {
+  renderInspectBanner();
   const run = data.run, runner = data.runner || {};
-  const pill = $('run-pill');
-  if (runner.running) { pill.textContent = '● running — ' + (runner.goal || run?.goal || ''); }
-  else if (run) { pill.textContent = run.status + ' — ' + run.goal; }
-  else { pill.textContent = 'no run yet'; }
-  $('start').disabled = !!runner.running;
-  $('stop').disabled = !runner.running;
+  const [phaseKind, phaseLabel, phaseDetail] = computePhase(data);
+  setPhase(phaseKind, phaseLabel, phaseDetail);
+
+  $('start').disabled = !!runner.running || isHistorical;
+  $('stop').disabled = !runner.running || isHistorical;
+  $('goal').disabled = isHistorical;
 
   const dag = data.dag || [];
   const tasksById = {}; (data.tasks || []).forEach(t => tasksById[t.task_id] = t);
@@ -260,7 +640,6 @@ function render(data) {
   const waves = (data.tasks || []).map(t => t.wave || 0);
   $('t-wave').textContent = waves.length ? Math.max(...waves) : '–';
   $('t-wave-s').textContent = runner.running ? 'in progress' : (run ? 'final' : '');
-
 
   const doneCount = dag.filter(n => n.status === 'done').length;
   $('t-tasks').textContent = dag.length ? `${doneCount}/${dag.length}` : '–';
@@ -289,7 +668,7 @@ function render(data) {
   if (dag.length) {
     $('dag').innerHTML = dag.map(n => {
       const t = tasksById[n.id];
-      const live = ['running','ready'].includes(n.status) && runner.running;
+      const live = ['running','ready'].includes(n.status) && runner.running && !isHistorical;
       const deps = (n.dependencies || []).map(d => {
         const ds = (dag.find(x => x.id === d) || {}).status;
         return `<span class="chip${ds === 'done' ? ' dep-done' : ''}">needs ${esc(d)}${ds === 'done' ? ' ✓' : ''}</span>`;
@@ -308,17 +687,21 @@ function render(data) {
         ${reason}
       </div>`;
     }).join('');
+  } else {
+    $('dag').innerHTML = '<div class="empty">Start a run to see the decomposed task DAG.</div>';
   }
 
   if (agents.length) {
     $('agents').innerHTML = agents.slice().reverse().map(a => {
-      const live = ['spawning','running','verifying'].includes(a.status) && runner.running;
+      const live = ['spawning','running','verifying'].includes(a.status) && runner.running && !isHistorical;
       return `<div class="agent">
         <span class="name">w${a.wave}·${esc(a.task_id)}</span>
         ${statusSpan(a.status, live)}
         <span class="det">${esc(a.detail || '')}</span>
       </div>`;
     }).join('');
+  } else {
+    $('agents').innerHTML = '<div class="empty">No agents yet.</div>';
   }
 
   const swarm = data.swarm || {};
@@ -330,9 +713,13 @@ function render(data) {
       Object.entries(byStatus).map(([s, n]) => `<div class="swarm-line">· ${n} ${esc(s)}</div>`).join('') +
       (swarm.agents || []).slice(-5).reverse().map(a =>
         `<div class="swarm-line" style="font-size:12px;color:var(--muted)">${esc(a.name || a.id || '?')} (${esc(a.type || '')})</div>`).join('');
+  } else if (!isHistorical) {
+    $('swarm').innerHTML = '<div class="empty">No swarm data yet.</div>';
   }
 
-  (data.events || []).forEach(e => {
+  const events = data.events || [];
+  if (isHistorical) $('log').innerHTML = '';
+  events.forEach(e => {
     lastEventId = Math.max(lastEventId, e.event_id);
     const ts = (e.ts || '').slice(11, 19);
     const div = document.createElement('div');
@@ -340,32 +727,38 @@ function render(data) {
     div.innerHTML = `<span class="ts">${ts}</span><span class="lv-${esc(e.level)}">${esc(e.message)}</span>`;
     $('log').appendChild(div);
   });
-  if ((data.events || []).length && logPinned) $('log').scrollTop = $('log').scrollHeight;
+  if (events.length && (logPinned || isHistorical)) $('log').scrollTop = $('log').scrollHeight;
 
-  renderThoughts(data.thoughts || [], dag);
+  renderThoughts(data.thoughts || [], dag, !runner.running || isHistorical);
 }
 
-function renderThoughts(thoughts, dag) {
+function renderThoughts(thoughts, dag, isLive) {
   const taskIds = [...new Set(thoughts.map(t => t.task_id))];
-  if (!taskIds.length) return;
+  if (!taskIds.length) {
+    $('thought-tabs').innerHTML = '';
+    $('thoughts').innerHTML = '<div class="empty">No thoughts recorded yet.</div>';
+    return;
+  }
   if (!selectedThoughtTask || !taskIds.includes(selectedThoughtTask)) {
     selectedThoughtTask = taskIds[0];
   }
 
   $('thought-tabs').innerHTML = taskIds.map(tid => {
     const node = (dag || []).find(n => n.id === tid);
-    const live = node && node.status === 'running';
+    const live = isLive && node && node.status === 'running';
     return `<button class="thought-tab${tid === selectedThoughtTask ? ' active' : ''}" data-task="${esc(tid)}">
       ${esc(tid)}${live ? ' ●' : ''}</button>`;
   }).join('');
   $('thought-tabs').querySelectorAll('.thought-tab').forEach(btn => {
-    btn.onclick = () => { selectedThoughtTask = btn.dataset.task; renderThoughts(thoughts, dag); };
+    btn.onclick = () => { selectedThoughtTask = btn.dataset.task; renderThoughts(thoughts, dag, isLive); };
   });
 
-  const forTask = thoughts.filter(t => t.task_id === selectedThoughtTask).slice().reverse();
+  const forTask = thoughts.filter(t => t.task_id === selectedThoughtTask);
+  // Live payload arrives newest-first (capped window); historical arrives oldest-first (full transcript).
+  const ordered = isLive ? forTask.slice().reverse() : forTask;
   const wasPinned = $('thoughts').scrollTop + $('thoughts').clientHeight >= $('thoughts').scrollHeight - 20;
-  $('thoughts').innerHTML = forTask.length
-    ? forTask.map(t => `<div class="thought-line">
+  $('thoughts').innerHTML = ordered.length
+    ? ordered.map(t => `<div class="thought-line">
         <span class="thought-kind tk-${esc(t.kind)}">${esc(THOUGHT_KIND_LABEL[t.kind] || t.kind)}</span>
         <span class="thought-body">${esc(t.content)}</span>
       </div>`).join('')
@@ -378,31 +771,25 @@ $('log').addEventListener('scroll', () => {
   logPinned = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
 });
 
-async function poll() {
-  try {
-    const r = await fetch('/api/state?after=' + lastEventId);
-    render(await r.json());
-  } catch (e) { $('run-pill').textContent = 'server unreachable'; }
-}
-
 $('start').onclick = async () => {
   const goal = $('goal').value.trim();
-  if (!goal) { $('goal').focus(); return; }
+  if (!goal || !currentProject) { $('goal').focus(); return; }
   $('start').disabled = true;
-  const r = await fetch('/api/run', { method: 'POST', headers: {'Content-Type': 'application/json'},
-                                      body: JSON.stringify({ goal }) });
+  const r = await fetch(`/api/projects/${currentProject.id}/run`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ goal }),
+  });
   const res = await r.json();
-  if (!res.ok) { alert(res.error); $('start').disabled = false; }
+  if (!r.ok) { alert(res.detail || res.error || 'Failed to start run.'); $('start').disabled = false; return; }
+  inspectingRunId = null;
   poll();
 };
 $('stop').onclick = async () => {
-  if (!confirm('Terminate the running orchestration?')) return;
-  await fetch('/api/stop', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+  if (!currentProject || !confirm('Terminate the running orchestration?')) return;
+  await fetch(`/api/projects/${currentProject.id}/stop`, { method: 'POST' });
   poll();
 };
 
-poll();
-setInterval(poll, 1500);
+showHub();
 </script>
 </body>
 </html>

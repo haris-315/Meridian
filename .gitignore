@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
 
 # Meridian per-project brain (created in whatever folder the orchestrator runs from)
 .meridian/

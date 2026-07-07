@@ -748,6 +748,114 @@ class StateManager:
         return {'run': run, 'tasks': tasks, 'agents': agents, 'events': events, 'dag': dag,
                 'reasoning': reasoning, 'thoughts': thoughts}
 
+    def list_runs(self) -> List[Dict[str, Any]]:
+        """Every run ever recorded in this project, newest first - for the
+        dashboard's run-history list."""
+        conn = self._connect()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT run_id, goal, status, started_at, finished_at, total_cost_usd
+            FROM runs ORDER BY run_id DESC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [
+            {'run_id': r[0], 'goal': r[1], 'status': r[2],
+             'started_at': r[3], 'finished_at': r[4], 'total_cost_usd': r[5] or 0.0}
+            for r in rows
+        ]
+
+    def get_run_snapshot(self, run_id: int) -> Dict[str, Any]:
+        """Full detail for one specific historical run - same shape as
+        get_dashboard_state but pinned to run_id instead of "whatever's
+        latest", and returned in full (ascending, uncapped) since a finished
+        run's data is bounded and this is for after-the-fact inspection, not
+        a live incremental poll."""
+        conn = self._connect()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT run_id, goal, status, working_dir, started_at, finished_at, total_cost_usd
+            FROM runs WHERE run_id = ?
+        """, (run_id,))
+        row = cursor.fetchone()
+        run = None
+        if row:
+            run = {
+                'run_id': row[0], 'goal': row[1], 'status': row[2],
+                'working_dir': row[3], 'started_at': row[4],
+                'finished_at': row[5], 'total_cost_usd': row[6] or 0.0,
+            }
+
+        cursor.execute("""
+            SELECT task_id, status, description, result, cost_usd, verified, wave, retry_count, model
+            FROM tasks WHERE run_id = ? ORDER BY wave ASC, task_id ASC
+        """, (run_id,))
+        tasks = [
+            {
+                'task_id': r[0], 'status': r[1], 'description': r[2],
+                'result': (r[3] or '')[:400], 'cost_usd': r[4] or 0.0,
+                'verified': bool(r[5]), 'wave': r[6], 'retry_count': r[7] or 0,
+                'model': r[8],
+            }
+            for r in cursor.fetchall()
+        ]
+
+        cursor.execute("""
+            SELECT task_id, wave, status, detail, ruflo_agent_id, started_at, updated_at
+            FROM agents WHERE run_id = ? ORDER BY wave ASC, task_id ASC
+        """, (run_id,))
+        agents = [
+            {
+                'task_id': r[0], 'wave': r[1], 'status': r[2], 'detail': r[3],
+                'ruflo_agent_id': r[4], 'started_at': r[5], 'updated_at': r[6],
+            }
+            for r in cursor.fetchall()
+        ]
+
+        cursor.execute("""
+            SELECT event_id, ts, level, source, message, wave
+            FROM events WHERE run_id = ? ORDER BY event_id ASC
+        """, (run_id,))
+        events = [
+            {'event_id': r[0], 'ts': r[1], 'level': r[2], 'source': r[3], 'message': r[4], 'wave': r[5]}
+            for r in cursor.fetchall()
+        ]
+
+        cursor.execute("SELECT dag_json FROM dag_snapshot WHERE run_id = ?", (run_id,))
+        dag_row = cursor.fetchone()
+
+        cursor.execute("""
+            SELECT task_id, wave, attempt_number, failure_type, diagnostic_message, timestamp
+            FROM task_reasoning WHERE run_id = ? ORDER BY reasoning_id ASC
+        """, (run_id,))
+        reasoning = [
+            {'task_id': r[0], 'wave': r[1], 'attempt_number': r[2],
+             'failure_type': r[3], 'diagnostic_message': r[4], 'timestamp': r[5]}
+            for r in cursor.fetchall()
+        ]
+
+        cursor.execute("""
+            SELECT thought_id, task_id, wave, kind, content, timestamp
+            FROM agent_thoughts WHERE run_id = ? ORDER BY thought_id ASC
+        """, (run_id,))
+        thoughts = [
+            {'thought_id': r[0], 'task_id': r[1], 'wave': r[2], 'kind': r[3],
+             'content': r[4], 'timestamp': r[5]}
+            for r in cursor.fetchall()
+        ]
+        conn.close()
+
+        dag = []
+        if dag_row and dag_row[0]:
+            try:
+                dag = json.loads(dag_row[0])
+            except json.JSONDecodeError:
+                dag = []
+
+        return {'run': run, 'tasks': tasks, 'agents': agents, 'events': events, 'dag': dag,
+                'reasoning': reasoning, 'thoughts': thoughts}
+
     def clear(self) -> None:
         """Clear all data (for testing)."""
         conn = self._connect()
