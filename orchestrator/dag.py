@@ -31,14 +31,17 @@ class DAGBuilder:
     def __init__(self) -> None:
         self.tasks: Dict[str, TaskNode] = {}
 
-    def build_from_goal(self, goal: str, prior_context: str = "") -> Dict[str, TaskNode]:
+    def build_from_goal(self, goal: str, prior_context: str = "", grounding: str = "") -> Dict[str, TaskNode]:
         """Decompose a plain text goal into a task DAG via a headless Claude call.
         `prior_context`, if given, is a summary of the most recent completed run
         in this project - so "refactor the calculator" decomposes with real
         knowledge of what add()/subtract()/etc. already exist, instead of
-        re-planning from a blank slate. Falls back to a single task if
-        decomposition fails for any reason."""
-        tasks_data = self._decompose_goal(goal, prior_context)
+        re-planning from a blank slate. `grounding`, if given, is a live file
+        listing (+ compacted rolling digest) of the actual project state -
+        ground truth to check prior_context against, since a stored summary
+        can drift stale in a way a filesystem listing cannot. Falls back to a
+        single task if decomposition fails for any reason."""
+        tasks_data = self._decompose_goal(goal, prior_context, grounding)
         if not tasks_data:
             return self._single_task_fallback(goal)
 
@@ -60,11 +63,11 @@ class DAGBuilder:
 
         return self.tasks
 
-    def _decompose_goal(self, goal: str, prior_context: str = "") -> Optional[List[Dict]]:
+    def _decompose_goal(self, goal: str, prior_context: str = "", grounding: str = "") -> Optional[List[Dict]]:
         """Call claude -p headlessly to break the goal into subtasks. Returns
         None (never raises) if the call fails, times out, or the output can't
         be parsed into a valid task list."""
-        prompt = self._build_decomposition_prompt(goal, prior_context)
+        prompt = self._build_decomposition_prompt(goal, prior_context, grounding)
 
         try:
             result = subprocess.run(
@@ -115,14 +118,19 @@ class DAGBuilder:
 
         return data
 
-    def _build_decomposition_prompt(self, goal: str, prior_context: str = "") -> str:
+    def _build_decomposition_prompt(self, goal: str, prior_context: str = "", grounding: str = "") -> str:
         """Build the prompt instructing Claude to decompose the goal into a JSON task DAG."""
         context_block = f"\n{prior_context}\n" if prior_context else ""
+        grounding_block = (
+            f"\nProject state (ground truth - trust this file listing over prior_context above "
+            f"if they disagree; also inspect files directly before finalizing the plan if unsure):\n"
+            f"{grounding}\n"
+        ) if grounding else ""
         return f"""Break the following goal into the MINIMUM number of focused, independently
 executable subtasks needed to accomplish it correctly.
 
 Goal: {goal}
-{context_block}
+{context_block}{grounding_block}
 
 Rules:
 - Use the fewest tasks that make sense. If the entire goal is simple enough for a single

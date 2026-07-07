@@ -16,6 +16,7 @@ from checkpoint import Checkpoint
 from report import generate_final_report
 from failure_analyzer import classify_failure, FailureType
 from redecompose import redecompose_task
+from context_digest import format_digest, list_project_files
 
 MAX_RETRIES_PER_TASK = 2
 MAX_STAGNANT_WAVES = 2
@@ -98,9 +99,14 @@ class Orchestrator:
                               "injecting its context into this run")
         self.executor.prior_context = prior_context_text
 
+        grounding_text = "\n\n".join(filter(None, [
+            list_project_files(str(self.working_dir)),
+            format_digest(self.brain),
+        ]))
+
         self._log("info", "Decomposing goal into a task DAG (LLM call)...")
         builder = DAGBuilder()
-        self.dag = builder.build_from_goal(goal, prior_context=prior_context_text)
+        self.dag = builder.build_from_goal(goal, prior_context=prior_context_text, grounding=grounding_text)
         self.scheduler = Scheduler(self.dag)
         self._log("info", f"Built DAG with {len(self.dag)} tasks")
         for task_id, node in self.dag.items():

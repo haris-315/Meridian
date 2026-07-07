@@ -7,7 +7,7 @@ from typing import Callable, Dict, List, Any, Optional
 from dag import TaskNode
 from brain import Brain, is_ruflo_available
 from model_router import select_model
-from context_digest import format_digest
+from context_digest import format_digest, list_project_files
 
 USE_RUFLO = True  # set False to fall back to plain TaskExecutor
 MAX_CONCURRENT_TASKS = 8
@@ -202,11 +202,25 @@ class TaskExecutor:
         if wave_num == 1 and self.prior_context:
             prior_run_section = f"\n\n{self.prior_context}"
 
+        # Ground truth first, narrative second: a file listing can't drift
+        # stale the way a stored summary can, so agents are told explicitly
+        # to trust it over the digest/prior-run text above if they conflict.
+        # Recomputed fresh every call (not cached) since files change task
+        # to task within a wave and across waves.
+        grounding_parts = []
+        file_listing = list_project_files(self.working_dir)
+        if file_listing:
+            grounding_parts.append(file_listing)
+        digest_text = format_digest(self.brain)
+        if digest_text:
+            grounding_parts.append(digest_text)
         digest_section = ""
-        if wave_num > 1:
-            digest_text = format_digest(self.brain)
-            if digest_text:
-                digest_section = f"\n\n{digest_text}"
+        if grounding_parts:
+            digest_section = (
+                "\n\nProject state (the file listing is ground truth - trust it over any "
+                "summary here if they ever disagree, since summaries can be stale or "
+                "compacted):\n\n" + "\n\n".join(grounding_parts)
+            )
 
         retry_section = ""
         if wave_num > 1 and self.brain:

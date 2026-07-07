@@ -12,10 +12,13 @@ prompt size contributed by this digest is roughly constant whether a project
 has run 5 tasks total or 5,000 - the opposite of concatenating history.
 """
 import json
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 DIGEST_KEY = "context_digest"
 MAX_RECENT_ENTRIES = 6
+MAX_LISTED_FILES = 40
+IGNORED_DIR_NAMES = {".git", ".meridian", "__pycache__", "node_modules", ".venv", "venv"}
 
 
 def _load(brain) -> Dict[str, Any]:
@@ -51,6 +54,36 @@ def update_digest(brain, task_id: str, description: str, verified: bool, result_
         if oldest['verified']:
             data['earlier_verified'] += 1
     brain.memory_store(DIGEST_KEY, data)
+
+
+def list_project_files(working_dir: str, max_files: int = MAX_LISTED_FILES) -> str:
+    """A cheap, always-accurate snapshot of what actually exists in the project
+    right now - the ground truth that the narrative digest (a summary, which
+    can drift stale or get compacted away) should be checked against, not
+    trusted blindly instead of. No LLM call, just a filesystem walk, so this
+    costs nothing and can never be wrong the way a summary can."""
+    root = Path(working_dir)
+    if not root.is_dir():
+        return ""
+
+    files = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if any(part in IGNORED_DIR_NAMES for part in path.relative_to(root).parts):
+            continue
+        files.append(str(path.relative_to(root)))
+        if len(files) > max_files:
+            break
+
+    if not files:
+        return ""
+
+    if len(files) > max_files:
+        shown = files[:max_files]
+        return "Files currently in the project:\n" + "\n".join(f"  - {f}" for f in shown) + \
+            f"\n  ...and more (listing truncated at {max_files})"
+    return "Files currently in the project:\n" + "\n".join(f"  - {f}" for f in files)
 
 
 def format_digest(brain) -> str:
@@ -117,5 +150,22 @@ if __name__ == "__main__":
     print(f"  digest length after 57 total tasks: {len(text)} chars")
     assert len(text) < 1200  # stays small no matter how many tasks ran
     assert "earlier task(s)" in text
+
+    print("\nTest 5 - list_project_files ignores noise dirs and finds real files:")
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "src").mkdir()
+        Path(tmp, "src", "app.py").write_text("x")
+        Path(tmp, "__pycache__").mkdir()
+        Path(tmp, "__pycache__", "app.cpython-311.pyc").write_text("junk")
+        Path(tmp, ".git").mkdir()
+        Path(tmp, ".git", "HEAD").write_text("ref")
+        Path(tmp, "README.md").write_text("x")
+        listing = list_project_files(tmp)
+        print(listing)
+        assert "src/app.py" in listing
+        assert "README.md" in listing
+        assert "__pycache__" not in listing
+        assert ".git" not in listing
 
     print("\nAll tests passed!")
