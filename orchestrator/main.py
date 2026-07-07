@@ -15,6 +15,7 @@ from state import StateManager
 from checkpoint import Checkpoint
 from report import generate_final_report
 from failure_analyzer import classify_failure, FailureType
+from redecompose import redecompose_task
 
 MAX_RETRIES_PER_TASK = 2
 MAX_STAGNANT_WAVES = 2
@@ -41,6 +42,7 @@ class Orchestrator:
         self.stall_reason: Optional[str] = None
         self.consecutive_rate_limited_waves = 0
         self.last_wave_rate_limited_only = False
+        self.redecomposed_ids: set = set()
 
     def _log(self, level: str, message: str, wave: int = 0) -> None:
         """Print to stdout AND persist to the events table so the dashboard's
@@ -296,6 +298,55 @@ class Orchestrator:
         checkpoint.show_stall_alert(reason, stuck_tasks, cost_so_far)
         return checkpoint.prompt_stall_decision()
 
+    def _attempt_redecomposition(self, task_id: str) -> bool:
+        """Try to recover a permanently-failed task by splitting it into
+        smaller subtasks, informed by its failure history - attempted once per
+        task, before ever escalating to a human. Returns True if the DAG was
+        successfully rewired (new subtasks spliced in, dependents repointed)
+        and the run can continue autonomously."""
+        if task_id in self.redecomposed_ids:
+            return False
+        self.redecomposed_ids.add(task_id)
+
+        task = self.dag[task_id]
+        reasoning = self.state.get_reasoning_for_task(task_id)
+        failure_context = "\n".join(r['diagnostic_message'] for r in reasoning[-3:]) or "No details captured."
+
+        self._log("info", f"Attempting auto-redecomposition of stuck task {task_id}...")
+        subtasks_data = redecompose_task(task, failure_context)
+        if not subtasks_data:
+            self._log("warn", f"Auto-redecomposition of {task_id} failed (LLM call unusable)")
+            return False
+
+        id_map = {t['id']: f"{task_id}_r{i}" for i, t in enumerate(subtasks_data)}
+        new_nodes: Dict[str, TaskNode] = {}
+        for t in subtasks_data:
+            new_id = id_map[t['id']]
+            deps = [id_map[d] for d in t.get('dependencies', []) if d in id_map]
+            if not deps:
+                deps = list(task.dependencies)
+            new_nodes[new_id] = TaskNode(
+                id=new_id, description=t['description'], dependencies=deps,
+                verify_commands=t.get('verify_commands', []),
+            )
+
+        # Anything that depended on the failed task now depends on its new
+        # leaf subtasks (those nothing else in the replacement group depends on).
+        leaf_ids = [
+            nid for nid in new_nodes
+            if not any(nid in other.dependencies for other in new_nodes.values())
+        ]
+        for other_task in self.dag.values():
+            if task_id in other_task.dependencies:
+                other_task.dependencies = [d for d in other_task.dependencies if d != task_id] + leaf_ids
+
+        del self.dag[task_id]
+        self.dag.update(new_nodes)
+        self.scheduler = Scheduler(self.dag)
+        self._log("info", f"Replaced {task_id} with {len(new_nodes)} subtask(s): {list(new_nodes.keys())}")
+        self.state.sync_dag(self.dag)
+        return True
+
     def _reset_all_retryable_failures(self) -> None:
         for task in self.dag.values():
             if task.status == TaskStatus.FAILED:
@@ -356,6 +407,12 @@ class Orchestrator:
             persistent_rate_limit = self.consecutive_rate_limited_waves > MAX_CONSECUTIVE_RATE_LIMITED_WAVES
             if not (exhausted or self.stagnant_waves >= MAX_STAGNANT_WAVES or persistent_rate_limit):
                 continue
+
+            if exhausted and not persistent_rate_limit:
+                stuck_ids = [t.id for t in self.dag.values() if t.status == TaskStatus.FAILED]
+                if any(self._attempt_redecomposition(tid) for tid in stuck_ids):
+                    self.stagnant_waves = 0
+                    continue
 
             if not allow_escalation:
                 self.stalled = True
