@@ -14,6 +14,7 @@ from verifier import TaskVerifier
 from state import StateManager
 from checkpoint import Checkpoint
 from report import generate_final_report
+from failure_analyzer import classify_failure, FailureType
 
 MAX_RETRIES_PER_TASK = 2
 MAX_STAGNANT_WAVES = 2
@@ -126,17 +127,22 @@ class Orchestrator:
                 self.retry_counts.pop(task.id, None)
                 self.state.set_agent_state(task.id, self.wave_number, "done", "verified", None)
             else:
-                is_rate_limited = executor_result.get('error') == 'rate_limited'
+                diagnosis = classify_failure(executor_result, verifier_result)
+                is_rate_limited = diagnosis.failure_type == FailureType.RATE_LIMITED
                 if is_rate_limited:
                     rate_limited_ids.add(task.id)
                 else:
                     non_rate_limited_failure_ids.add(task.id)
+                self.state.store_reasoning(
+                    task.id, self.wave_number, diagnosis.failure_type,
+                    diagnosis.diagnostic_message, self.retry_counts.get(task.id, 0),
+                )
                 self._handle_task_failure(task, rate_limited=is_rate_limited)
                 self._log("error", f"{task.id} failed command: {verifier_result['failed_command']}",
                           self.wave_number)
                 agent_status = "retrying" if task.status == TaskStatus.PENDING else "failed"
                 self.state.set_agent_state(task.id, self.wave_number, agent_status,
-                                           str(verifier_result.get('output', ''))[:200], None)
+                                           diagnosis.diagnostic_message[:200], None)
 
             self.state.write_task_result(
                 task.id, executor_result, verifier_result, task.description, self.wave_number,
@@ -156,6 +162,7 @@ class Orchestrator:
         self.state.write_wave_summary_memory(self.wave_number)
         self.scheduler.re_score()
         self.state.sync_dag(self.dag)
+        self.state.save_checkpoint(self.dag, self.wave_number, self.retry_counts)
         return executed
 
     def _handle_task_failure(self, task: TaskNode, rate_limited: bool = False) -> None:
@@ -201,6 +208,38 @@ class Orchestrator:
             if test_files:
                 commands = [f"pytest {' '.join(test_files)} -q"]
         return self.verifier.verify(commands)
+
+    def try_resume(self) -> bool:
+        """Check this project's brain for a run left 'interrupted' by a crash
+        (start_run() marks any dangling 'running' row this way on the next
+        startup) and rebuild the DAG from its last checkpoint. Returns True if
+        a run was resumed - build_dag/the LLM decomposition call is skipped
+        entirely in that case, so a crash costs at most one wave of progress,
+        not the whole run's decomposition + completed waves."""
+        resumable = self.state.find_resumable_run()
+        if not resumable:
+            return False
+
+        self._log("info", f"Found interrupted run (id={resumable['run_id']}, "
+                          f"wave {resumable['wave_number']}) - resuming instead of restarting")
+        snapshot = json.loads(resumable['dag_json'])
+        self.dag = {}
+        for node in snapshot:
+            status = TaskStatus(node['status'])
+            # A task recorded RUNNING at crash time never got verified - treat
+            # it as not-yet-attempted rather than assuming it finished.
+            if status == TaskStatus.RUNNING:
+                status = TaskStatus.PENDING
+            self.dag[node['id']] = TaskNode(
+                id=node['id'], description=node['description'],
+                dependencies=node['dependencies'], status=status,
+                verify_commands=node.get('verify_commands', []),
+            )
+        self.scheduler = Scheduler(self.dag)
+        self.wave_number = resumable['wave_number']
+        self.retry_counts = resumable['retry_counts']
+        self.state.sync_dag(self.dag)
+        return True
 
     def is_complete(self) -> bool:
         """Check if all tasks are done or skipped (skipped counts as terminal)."""
@@ -338,12 +377,16 @@ class Orchestrator:
         print(json.dumps(report, indent=2))
         return report
 
-    def run(self, goal: str, allow_escalation: bool = True) -> Dict[str, Any]:
-        """Main entry point: build DAG and run orchestration loop."""
+    def run(self, goal: str, allow_escalation: bool = True, resume: bool = True) -> Dict[str, Any]:
+        """Main entry point: resume an interrupted run if one exists in this
+        project's brain, otherwise build a fresh DAG from `goal` and run the
+        orchestration loop. `resume` is skipped for the self-test/JSON-DAG
+        call paths where a fresh DAG is explicitly wanted."""
         self.state.start_run(goal, str(self.working_dir))
         self._log("info", f"Goal: {goal}")
         self.start_commit = self._capture_start_commit()
-        self.build_dag(goal)
+        if not (resume and self.try_resume()):
+            self.build_dag(goal)
         self.run_loop(allow_escalation=allow_escalation)
         report = self.show_final_summary()
         run_status = "stalled" if self.stalled else ("complete" if self.is_complete() else "stopped")

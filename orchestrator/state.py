@@ -100,6 +100,29 @@ class StateManager:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS task_reasoning (
+                reasoning_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT,
+                run_id INTEGER,
+                wave INTEGER,
+                attempt_number INTEGER,
+                failure_type TEXT,
+                diagnostic_message TEXT,
+                timestamp TEXT
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS checkpoints (
+                run_id INTEGER PRIMARY KEY,
+                wave_number INTEGER,
+                dag_json TEXT,
+                retry_counts_json TEXT,
+                updated_at TEXT
+            )
+        """)
+
         conn.commit()
         conn.close()
 
@@ -159,6 +182,107 @@ class StateManager:
             conn.close()
         except sqlite3.Error:
             pass
+
+    # ------------------------------------------------------------ reasoning
+
+    def store_reasoning(self, task_id: str, wave: int, failure_type: str,
+                        diagnostic_message: str, attempt_number: int = 0) -> None:
+        """Persist why a task failed (structured, not just raw output) for the
+        dashboard's reasoning trace and future failure-pattern analysis."""
+        try:
+            conn = self._connect()
+            conn.execute("""
+                INSERT INTO task_reasoning
+                (task_id, run_id, wave, attempt_number, failure_type, diagnostic_message, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (task_id, self.run_id, wave, attempt_number, failure_type,
+                  diagnostic_message[:1000], _now()))
+            conn.commit()
+            conn.close()
+        except sqlite3.Error:
+            pass
+
+    def get_reasoning_for_task(self, task_id: str) -> List[Dict[str, Any]]:
+        """All recorded failure diagnoses for one task, oldest first - the
+        agent's attempt history in one call."""
+        conn = self._connect()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT wave, attempt_number, failure_type, diagnostic_message, timestamp
+            FROM task_reasoning WHERE task_id = ? AND run_id IS ?
+            ORDER BY reasoning_id ASC
+        """, (task_id, self.run_id))
+        rows = cursor.fetchall()
+        conn.close()
+        return [
+            {'wave': r[0], 'attempt_number': r[1], 'failure_type': r[2],
+             'diagnostic_message': r[3], 'timestamp': r[4]}
+            for r in rows
+        ]
+
+    # ----------------------------------------------------------- checkpoints
+
+    def save_checkpoint(self, dag: Dict[str, Any], wave_number: int,
+                        retry_counts: Dict[str, int]) -> None:
+        """Snapshot enough state to resume this run from scratch after a crash:
+        full DAG (with statuses), current wave number, and retry budgets used
+        so far. Called after every wave - a crash mid-wave loses at most one
+        wave of progress, not the whole run."""
+        snapshot = [
+            {
+                'id': node.id,
+                'description': node.description,
+                'dependencies': list(node.dependencies),
+                'status': node.status.value,
+                'verify_commands': list(node.verify_commands),
+            }
+            for node in dag.values()
+        ]
+        try:
+            conn = self._connect()
+            conn.execute("""
+                INSERT OR REPLACE INTO checkpoints
+                (run_id, wave_number, dag_json, retry_counts_json, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (self.run_id, wave_number, json.dumps(snapshot), json.dumps(retry_counts), _now()))
+            conn.commit()
+            conn.close()
+        except sqlite3.Error:
+            pass
+
+    def find_resumable_run(self) -> Optional[Dict[str, Any]]:
+        """Find the most recent run left 'interrupted' (start_run marks any
+        dangling 'running' row this way on the next startup - a live process
+        never leaves its own run in that state) that has a checkpoint to
+        resume from. Returns None if there's nothing to resume."""
+        conn = self._connect()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT run_id, goal, working_dir FROM runs
+            WHERE status = 'interrupted' ORDER BY run_id DESC LIMIT 1
+        """)
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return None
+        run_id, goal, working_dir = row
+
+        cursor.execute("""
+            SELECT wave_number, dag_json, retry_counts_json FROM checkpoints WHERE run_id = ?
+        """, (run_id,))
+        cp = cursor.fetchone()
+        conn.close()
+        if not cp:
+            return None
+
+        return {
+            'run_id': run_id,
+            'goal': goal,
+            'working_dir': working_dir,
+            'wave_number': cp[0],
+            'dag_json': cp[1],
+            'retry_counts': json.loads(cp[2] or '{}'),
+        }
 
     # --------------------------------------------------------------- events
 
@@ -481,6 +605,16 @@ class StateManager:
 
         cursor.execute("SELECT dag_json FROM dag_snapshot ORDER BY run_id DESC LIMIT 1")
         dag_row = cursor.fetchone()
+
+        cursor.execute("""
+            SELECT task_id, wave, attempt_number, failure_type, diagnostic_message, timestamp
+            FROM task_reasoning WHERE run_id IS ? ORDER BY reasoning_id DESC LIMIT 100
+        """, run_filter)
+        reasoning = [
+            {'task_id': r[0], 'wave': r[1], 'attempt_number': r[2],
+             'failure_type': r[3], 'diagnostic_message': r[4], 'timestamp': r[5]}
+            for r in cursor.fetchall()
+        ]
         conn.close()
 
         dag = []
@@ -490,13 +624,14 @@ class StateManager:
             except json.JSONDecodeError:
                 dag = []
 
-        return {'run': run, 'tasks': tasks, 'agents': agents, 'events': events, 'dag': dag}
+        return {'run': run, 'tasks': tasks, 'agents': agents, 'events': events, 'dag': dag,
+                'reasoning': reasoning}
 
     def clear(self) -> None:
         """Clear all data (for testing)."""
         conn = self._connect()
         cursor = conn.cursor()
-        for table in ("tasks", "runs", "agents", "events"):
+        for table in ("tasks", "runs", "agents", "events", "task_reasoning", "checkpoints"):
             cursor.execute(f"DELETE FROM {table}")
         conn.commit()
         conn.close()
