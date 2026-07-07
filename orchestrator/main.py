@@ -54,13 +54,16 @@ class Orchestrator:
         """Pick RufloExecutor when USE_RUFLO is enabled and the ruflo CLI is
         actually on PATH; otherwise fall back to plain TaskExecutor and say why."""
         status_cb = self.state.set_agent_state
+        thought_cb = self.state.log_agent_thought
         if USE_RUFLO:
             if is_ruflo_available():
                 print("[INFO] Ruflo CLI detected - using RufloExecutor")
-                return RufloExecutor(str(self.working_dir), brain=self.brain, status_cb=status_cb)
+                return RufloExecutor(str(self.working_dir), brain=self.brain,
+                                     status_cb=status_cb, thought_cb=thought_cb)
             print("[WARN] USE_RUFLO is True but 'ruflo' CLI was not found on PATH; "
                   "falling back to TaskExecutor", file=sys.stderr)
-        return TaskExecutor(str(self.working_dir), brain=self.brain, status_cb=status_cb)
+        return TaskExecutor(str(self.working_dir), brain=self.brain,
+                            status_cb=status_cb, thought_cb=thought_cb)
 
     @staticmethod
     def _format_prior_context(context: Dict[str, Any]) -> str:
@@ -73,7 +76,11 @@ class Orchestrator:
             f'Prior goal: "{context["goal"]}"',
             "Prior task outcomes:",
         ]
-        for t in context['tasks']:
+        tasks = context['tasks']
+        if len(tasks) > 8:
+            lines.append(f"  ...{len(tasks) - 8} earlier task(s) omitted for brevity...")
+            tasks = tasks[-8:]
+        for t in tasks:
             outcome = (t['result'] or '')[:200].replace('\n', ' ')
             lines.append(f"  - [{t['status']}] {t['task_id']}: {t['description']} -> {outcome}")
         lines.append(
@@ -131,7 +138,7 @@ class Orchestrator:
             task.status = TaskStatus.RUNNING
         self.state.sync_dag(self.dag)
 
-        executor_results = self.executor.execute_wave(ready_tasks, self.wave_number)
+        executor_results = self.executor.execute_wave(ready_tasks, self.wave_number, self.retry_counts)
 
         executed = 0
         rate_limited_ids = set()
@@ -178,6 +185,7 @@ class Orchestrator:
                 ruflo_task_id=executor_result.get('ruflo_task_id'),
                 ruflo_agent_id=executor_result.get('ruflo_agent_id'),
                 retry_count=self.retry_counts.get(task.id, 0),
+                model=executor_result.get('model'),
             )
 
         # Only treat the wave as "purely rate limited" (worth a silent backoff
@@ -188,7 +196,6 @@ class Orchestrator:
             executed == 0 and bool(rate_limited_ids) and not non_rate_limited_failure_ids
         )
 
-        self.state.write_wave_summary_memory(self.wave_number)
         self.scheduler.re_score()
         self.state.sync_dag(self.dag)
         self.state.save_checkpoint(self.dag, self.wave_number, self.retry_counts)

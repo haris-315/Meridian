@@ -21,6 +21,7 @@ class TaskNode:
     dependencies: List[str] = field(default_factory=list)
     status: TaskStatus = TaskStatus.PENDING
     verify_commands: List[str] = field(default_factory=list)
+    complexity: str = "medium"  # "simple" | "medium" | "complex" - drives model routing
 
     def __hash__(self) -> int:
         return hash(self.id)
@@ -48,7 +49,8 @@ class DAGBuilder:
                 id=task_id,
                 description=task['description'],
                 dependencies=task.get('dependencies', []),
-                verify_commands=task.get('verify_commands', [])
+                verify_commands=task.get('verify_commands', []),
+                complexity=task.get('complexity', 'medium'),
             )
 
         try:
@@ -104,7 +106,7 @@ class DAGBuilder:
         except json.JSONDecodeError:
             return None
 
-        if not isinstance(data, list) or len(data) < 2:
+        if not isinstance(data, list) or len(data) < 1:
             return None
 
         for task in data:
@@ -116,15 +118,25 @@ class DAGBuilder:
     def _build_decomposition_prompt(self, goal: str, prior_context: str = "") -> str:
         """Build the prompt instructing Claude to decompose the goal into a JSON task DAG."""
         context_block = f"\n{prior_context}\n" if prior_context else ""
-        return f"""Break the following goal into 3-6 focused, independently executable subtasks.
+        return f"""Break the following goal into the MINIMUM number of focused, independently
+executable subtasks needed to accomplish it correctly.
 
 Goal: {goal}
 {context_block}
 
 Rules:
+- Use the fewest tasks that make sense. If the entire goal is simple enough for a single
+  agent to complete correctly in one attempt (e.g. one small file, one function), return
+  EXACTLY ONE task - do not manufacture artificial splits (like a separate "write tests"
+  task for a two-line script) just to produce multiple tasks.
 - Each subtask must be self-contained and describe one unit of work.
 - Only add a dependency between two tasks if one genuinely cannot start before the other finishes.
 - Tasks that can run in parallel must have NO dependency on each other.
+- "complexity" must be one of "simple", "medium", or "complex", reflecting how much
+  capability the task needs: "simple" for boilerplate/small well-defined edits, "medium"
+  for typical feature work, "complex" for anything requiring careful design, multi-file
+  coordination, or nontrivial algorithmic correctness. This is used to route the task to
+  a cheaper or stronger model - be honest, do not default everything to "medium".
 - "verify_commands" should contain real shell commands that verify this specific task's output
   (e.g. "pytest test_file.py", "node file.js"). Use an empty list [] if no command applies.
 - verify_commands must invoke tools by their PATH name directly (e.g. "pytest x.py",
@@ -132,7 +144,7 @@ Rules:
   installed standalone rather than into the interpreter's site-packages.
 - Do not write, create, or modify any files. Only output the plan below.
 - Return ONLY valid JSON, no prose, no markdown fences, in exactly this format:
-[{{"id": "task_0", "description": "...", "dependencies": [], "verify_commands": []}}, ...]
+[{{"id": "task_0", "description": "...", "dependencies": [], "verify_commands": [], "complexity": "medium"}}, ...]
 """
 
     def _single_task_fallback(self, goal: str) -> Dict[str, TaskNode]:
@@ -153,7 +165,8 @@ Rules:
                 id=task_id,
                 description=task['description'],
                 dependencies=deps,
-                verify_commands=verify_commands
+                verify_commands=verify_commands,
+                complexity=task.get('complexity', 'medium'),
             )
         self.detect_cycles()
         return self.tasks

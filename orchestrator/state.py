@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, List
 from pathlib import Path
 
 from brain import Brain
+from context_digest import update_digest
 
 
 def _now() -> str:
@@ -93,6 +94,22 @@ class StateManager:
                 FROM tasks_pre_run_id
             """)
             cursor.execute("DROP TABLE tasks_pre_run_id")
+
+        cursor.execute("PRAGMA table_info(tasks)")
+        if 'model' not in [row[1] for row in cursor.fetchall()]:
+            cursor.execute("ALTER TABLE tasks ADD COLUMN model TEXT")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS agent_thoughts (
+                thought_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT,
+                run_id INTEGER,
+                wave INTEGER,
+                kind TEXT,
+                content TEXT,
+                timestamp TEXT
+            )
+        """)
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -412,7 +429,8 @@ class StateManager:
         wave: int = 0,
         ruflo_task_id: Optional[str] = None,
         ruflo_agent_id: Optional[str] = None,
-        retry_count: int = 0
+        retry_count: int = 0,
+        model: Optional[str] = None,
     ) -> None:
         """Write task execution and verification results."""
         conn = self._connect()
@@ -425,8 +443,8 @@ class StateManager:
             INSERT OR REPLACE INTO tasks
             (task_id, run_id, status, description, result, cost_usd, verified,
              executor_output, verifier_output, wave, timestamp,
-             ruflo_task_id, ruflo_agent_id, retry_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ruflo_task_id, ruflo_agent_id, retry_count, model)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             task_id,
             self.run_id,
@@ -441,7 +459,8 @@ class StateManager:
             _now(),
             ruflo_task_id,
             ruflo_agent_id,
-            retry_count
+            retry_count,
+            model,
         ))
 
         conn.commit()
@@ -456,6 +475,45 @@ class StateManager:
                 'verifier_output': (verifier_result.get('output') or '')[:500],
                 'cost_usd': executor_result.get('cost_usd', 0.0),
             })
+            update_digest(
+                self.brain, task_id, description, success,
+                executor_result.get('result', '') or (verifier_result.get('output') or ''),
+            )
+
+    # ------------------------------------------------------------- thoughts
+
+    def log_agent_thought(self, task_id: str, wave: int, kind: str, content: str) -> None:
+        """Persist one live reasoning event from an executing agent (thinking
+        text, a tool call, or interim assistant text) for the dashboard's
+        per-agent thought stream. Called from executor worker threads via a
+        streaming subprocess reader - must never raise or block."""
+        try:
+            conn = self._connect()
+            conn.execute(
+                "INSERT INTO agent_thoughts (task_id, run_id, wave, kind, content, timestamp) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (task_id, self.run_id, wave, kind, content[:600], _now()),
+            )
+            conn.commit()
+            conn.close()
+        except sqlite3.Error:
+            pass
+
+    def get_recent_thoughts(self, run_id: Optional[int] = None, limit: int = 300) -> List[Dict[str, Any]]:
+        """Latest thought events for the dashboard, newest first."""
+        conn = self._connect()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT thought_id, task_id, wave, kind, content, timestamp
+            FROM agent_thoughts WHERE run_id IS ? ORDER BY thought_id DESC LIMIT ?
+        """, (run_id, limit))
+        rows = cursor.fetchall()
+        conn.close()
+        return [
+            {'thought_id': r[0], 'task_id': r[1], 'wave': r[2], 'kind': r[3],
+             'content': r[4], 'timestamp': r[5]}
+            for r in rows
+        ]
 
     def get_task_status(self, task_id: str) -> Optional[str]:
         """Get current status of a task in the current run."""
@@ -515,35 +573,6 @@ class StateManager:
                 {'id': r[0], 'description': r[1], 'status': r[2]} for r in recent
             ]
         }
-
-    def write_wave_summary_memory(self, wave: int) -> None:
-        """Store one aggregate summary of an entire wave (all tasks, pass/fail,
-        short results) in the Brain under 'wave_{n}_summary', so the next wave's
-        executor prompts can pull the full shape of what was attempted, not just
-        their direct dependencies. Never raises."""
-        if not self.brain:
-            return
-
-        conn = self._connect()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT task_id, description, status, result FROM tasks WHERE wave = ? AND run_id IS ?
-        """, (wave, self.run_id))
-        rows = cursor.fetchall()
-        conn.close()
-
-        if not rows:
-            return
-
-        self.brain.memory_store(f"wave_{wave}_summary", [
-            {
-                'task_id': r[0],
-                'description': r[1],
-                'status': r[2],
-                'result': (r[3] or '')[:300],
-            }
-            for r in rows
-        ])
 
     def get_full_run_summary(self) -> Dict[str, Any]:
         """Cross-wave view of the current run: every task's full detail plus
@@ -647,7 +676,7 @@ class StateManager:
 
         dashboard_run_id = run['run_id'] if run else None
         cursor.execute("""
-            SELECT task_id, status, description, result, cost_usd, verified, wave, retry_count
+            SELECT task_id, status, description, result, cost_usd, verified, wave, retry_count, model
             FROM tasks WHERE run_id IS ? ORDER BY wave ASC, task_id ASC
         """, (dashboard_run_id,))
         tasks = [
@@ -655,6 +684,7 @@ class StateManager:
                 'task_id': r[0], 'status': r[1], 'description': r[2],
                 'result': (r[3] or '')[:400], 'cost_usd': r[4] or 0.0,
                 'verified': bool(r[5]), 'wave': r[6], 'retry_count': r[7] or 0,
+                'model': r[8],
             }
             for r in cursor.fetchall()
         ]
@@ -696,6 +726,16 @@ class StateManager:
              'failure_type': r[3], 'diagnostic_message': r[4], 'timestamp': r[5]}
             for r in cursor.fetchall()
         ]
+
+        cursor.execute("""
+            SELECT thought_id, task_id, wave, kind, content, timestamp
+            FROM agent_thoughts WHERE run_id IS ? ORDER BY thought_id DESC LIMIT 300
+        """, run_filter)
+        thoughts = [
+            {'thought_id': r[0], 'task_id': r[1], 'wave': r[2], 'kind': r[3],
+             'content': r[4], 'timestamp': r[5]}
+            for r in cursor.fetchall()
+        ]
         conn.close()
 
         dag = []
@@ -706,13 +746,13 @@ class StateManager:
                 dag = []
 
         return {'run': run, 'tasks': tasks, 'agents': agents, 'events': events, 'dag': dag,
-                'reasoning': reasoning}
+                'reasoning': reasoning, 'thoughts': thoughts}
 
     def clear(self) -> None:
         """Clear all data (for testing)."""
         conn = self._connect()
         cursor = conn.cursor()
-        for table in ("tasks", "runs", "agents", "events", "task_reasoning", "checkpoints"):
+        for table in ("tasks", "runs", "agents", "events", "task_reasoning", "checkpoints", "agent_thoughts"):
             cursor.execute(f"DELETE FROM {table}")
         conn.commit()
         conn.close()
