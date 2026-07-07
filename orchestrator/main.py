@@ -60,11 +60,38 @@ class Orchestrator:
                   "falling back to TaskExecutor", file=sys.stderr)
         return TaskExecutor(str(self.working_dir), brain=self.brain, status_cb=status_cb)
 
+    @staticmethod
+    def _format_prior_context(context: Dict[str, Any]) -> str:
+        """Render a prior completed run's summary as prompt text: what was
+        asked for, and the outcome of every task, so a new goal in the same
+        project (e.g. 'add a divide function to the calculator') can build on
+        real prior work instead of guessing what already exists."""
+        lines = [
+            f"Context - this project already has a completed prior run:",
+            f'Prior goal: "{context["goal"]}"',
+            "Prior task outcomes:",
+        ]
+        for t in context['tasks']:
+            outcome = (t['result'] or '')[:200].replace('\n', ' ')
+            lines.append(f"  - [{t['status']}] {t['task_id']}: {t['description']} -> {outcome}")
+        lines.append(
+            "Build on this existing work where relevant; do not recreate what already exists."
+        )
+        return "\n".join(lines)
+
     def build_dag(self, goal: str) -> None:
-        """Build initial DAG from goal."""
+        """Build initial DAG from goal, informed by the most recent completed
+        run in this project if one exists (cross-run context)."""
+        prior = self.state.get_last_completed_run_context()
+        prior_context_text = self._format_prior_context(prior) if prior else ""
+        if prior:
+            self._log("info", f"Found prior completed run (goal: \"{prior['goal'][:80]}\") - "
+                              "injecting its context into this run")
+        self.executor.prior_context = prior_context_text
+
         self._log("info", "Decomposing goal into a task DAG (LLM call)...")
         builder = DAGBuilder()
-        self.dag = builder.build_from_goal(goal)
+        self.dag = builder.build_from_goal(goal, prior_context=prior_context_text)
         self.scheduler = Scheduler(self.dag)
         self._log("info", f"Built DAG with {len(self.dag)} tasks")
         for task_id, node in self.dag.items():

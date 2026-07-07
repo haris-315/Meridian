@@ -30,10 +30,14 @@ class DAGBuilder:
     def __init__(self) -> None:
         self.tasks: Dict[str, TaskNode] = {}
 
-    def build_from_goal(self, goal: str) -> Dict[str, TaskNode]:
+    def build_from_goal(self, goal: str, prior_context: str = "") -> Dict[str, TaskNode]:
         """Decompose a plain text goal into a task DAG via a headless Claude call.
-        Falls back to a single task if decomposition fails for any reason."""
-        tasks_data = self._decompose_goal(goal)
+        `prior_context`, if given, is a summary of the most recent completed run
+        in this project - so "refactor the calculator" decomposes with real
+        knowledge of what add()/subtract()/etc. already exist, instead of
+        re-planning from a blank slate. Falls back to a single task if
+        decomposition fails for any reason."""
+        tasks_data = self._decompose_goal(goal, prior_context)
         if not tasks_data:
             return self._single_task_fallback(goal)
 
@@ -54,11 +58,11 @@ class DAGBuilder:
 
         return self.tasks
 
-    def _decompose_goal(self, goal: str) -> Optional[List[Dict]]:
+    def _decompose_goal(self, goal: str, prior_context: str = "") -> Optional[List[Dict]]:
         """Call claude -p headlessly to break the goal into subtasks. Returns
         None (never raises) if the call fails, times out, or the output can't
         be parsed into a valid task list."""
-        prompt = self._build_decomposition_prompt(goal)
+        prompt = self._build_decomposition_prompt(goal, prior_context)
 
         try:
             result = subprocess.run(
@@ -109,11 +113,13 @@ class DAGBuilder:
 
         return data
 
-    def _build_decomposition_prompt(self, goal: str) -> str:
+    def _build_decomposition_prompt(self, goal: str, prior_context: str = "") -> str:
         """Build the prompt instructing Claude to decompose the goal into a JSON task DAG."""
+        context_block = f"\n{prior_context}\n" if prior_context else ""
         return f"""Break the following goal into 3-6 focused, independently executable subtasks.
 
 Goal: {goal}
+{context_block}
 
 Rules:
 - Each subtask must be self-contained and describe one unit of work.

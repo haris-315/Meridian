@@ -38,7 +38,8 @@ class StateManager:
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS tasks (
-                task_id TEXT PRIMARY KEY,
+                task_id TEXT,
+                run_id INTEGER,
                 status TEXT NOT NULL,
                 description TEXT,
                 result TEXT,
@@ -50,9 +51,48 @@ class StateManager:
                 timestamp TEXT,
                 ruflo_task_id TEXT,
                 ruflo_agent_id TEXT,
-                retry_count INTEGER DEFAULT 0
+                retry_count INTEGER DEFAULT 0,
+                PRIMARY KEY (task_id, run_id)
             )
         """)
+
+        # Migrate pre-existing DBs: task_ids (task_0, task_1, ...) are reused by
+        # every run, so a `tasks` table without run_id silently overwrites one
+        # run's results with the next run's - breaking cost accounting and
+        # cross-run history for any project run more than once.
+        cursor.execute("PRAGMA table_info(tasks)")
+        existing_cols = [row[1] for row in cursor.fetchall()]
+        if existing_cols and 'run_id' not in existing_cols:
+            cursor.execute("ALTER TABLE tasks RENAME TO tasks_pre_run_id")
+            cursor.execute("""
+                CREATE TABLE tasks (
+                    task_id TEXT,
+                    run_id INTEGER,
+                    status TEXT NOT NULL,
+                    description TEXT,
+                    result TEXT,
+                    cost_usd REAL,
+                    verified BOOLEAN,
+                    executor_output TEXT,
+                    verifier_output TEXT,
+                    wave INTEGER,
+                    timestamp TEXT,
+                    ruflo_task_id TEXT,
+                    ruflo_agent_id TEXT,
+                    retry_count INTEGER DEFAULT 0,
+                    PRIMARY KEY (task_id, run_id)
+                )
+            """)
+            cursor.execute("""
+                INSERT INTO tasks (task_id, run_id, status, description, result, cost_usd,
+                                    verified, executor_output, verifier_output, wave, timestamp,
+                                    ruflo_task_id, ruflo_agent_id, retry_count)
+                SELECT task_id, NULL, status, description, result, cost_usd, verified,
+                       executor_output, verifier_output, wave, timestamp,
+                       ruflo_task_id, ruflo_agent_id, retry_count
+                FROM tasks_pre_run_id
+            """)
+            cursor.execute("DROP TABLE tasks_pre_run_id")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -284,6 +324,43 @@ class StateManager:
             'retry_counts': json.loads(cp[2] or '{}'),
         }
 
+    # ------------------------------------------------------------ cross-run
+
+    def get_last_completed_run_context(self) -> Optional[Dict[str, Any]]:
+        """Summary of the most recent 'complete' run before this one in the
+        same project - so a fresh goal like 'refactor the calculator' can be
+        decomposed and executed with real knowledge of what already exists,
+        instead of starting blind. Returns None for a project's first run."""
+        conn = self._connect()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT run_id, goal, total_cost_usd, finished_at FROM runs
+            WHERE status = 'complete' AND run_id != ? ORDER BY run_id DESC LIMIT 1
+        """, (self.run_id if self.run_id is not None else -1,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return None
+        prior_run_id, goal, cost, finished_at = row
+
+        cursor.execute("""
+            SELECT task_id, description, status, result FROM tasks
+            WHERE run_id = ? ORDER BY wave ASC, timestamp ASC
+        """, (prior_run_id,))
+        tasks = [
+            {'task_id': r[0], 'description': r[1], 'status': r[2], 'result': (r[3] or '')[:300]}
+            for r in cursor.fetchall()
+        ]
+        conn.close()
+
+        return {
+            'run_id': prior_run_id,
+            'goal': goal,
+            'cost_usd': cost or 0.0,
+            'finished_at': finished_at,
+            'tasks': tasks,
+        }
+
     # --------------------------------------------------------------- events
 
     def log_event(self, level: str, source: str, message: str, wave: int = 0) -> None:
@@ -346,12 +423,13 @@ class StateManager:
 
         cursor.execute("""
             INSERT OR REPLACE INTO tasks
-            (task_id, status, description, result, cost_usd, verified,
+            (task_id, run_id, status, description, result, cost_usd, verified,
              executor_output, verifier_output, wave, timestamp,
              ruflo_task_id, ruflo_agent_id, retry_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             task_id,
+            self.run_id,
             status,
             description,
             executor_result.get('result', ''),
@@ -380,46 +458,48 @@ class StateManager:
             })
 
     def get_task_status(self, task_id: str) -> Optional[str]:
-        """Get current status of a task."""
+        """Get current status of a task in the current run."""
         conn = self._connect()
         cursor = conn.cursor()
-        cursor.execute("SELECT status FROM tasks WHERE task_id = ?", (task_id,))
+        cursor.execute("SELECT status FROM tasks WHERE task_id = ? AND run_id IS ?", (task_id, self.run_id))
         row = cursor.fetchone()
         conn.close()
         return row[0] if row else None
 
     def get_wave_summary(self, wave: Optional[int] = None) -> Dict[str, Any]:
-        """Get summary of a specific wave's results (defaults to the latest wave)."""
+        """Get summary of a specific wave's results in the current run
+        (defaults to the latest wave)."""
         conn = self._connect()
         cursor = conn.cursor()
 
         if wave is None:
-            cursor.execute("SELECT MAX(wave) FROM tasks")
+            cursor.execute("SELECT MAX(wave) FROM tasks WHERE run_id IS ?", (self.run_id,))
             row = cursor.fetchone()
             wave = row[0] if row and row[0] is not None else 0
 
         cursor.execute("""
             SELECT COUNT(*), SUM(cost_usd), SUM(CASE WHEN verified THEN 1 ELSE 0 END)
-            FROM tasks WHERE status = 'done' AND wave = ?
-        """, (wave,))
+            FROM tasks WHERE status = 'done' AND wave = ? AND run_id IS ?
+        """, (wave, self.run_id))
         done_count, total_cost, verified_count = cursor.fetchone()
         done_count = done_count or 0
         total_cost = total_cost or 0.0
         verified_count = verified_count or 0
 
         cursor.execute("""
-            SELECT COUNT(*) FROM tasks WHERE status = 'failed' AND wave = ?
-        """, (wave,))
+            SELECT COUNT(*) FROM tasks WHERE status = 'failed' AND wave = ? AND run_id IS ?
+        """, (wave, self.run_id))
         failed_count = cursor.fetchone()[0] or 0
 
         cursor.execute("""
-            SELECT task_id, description, status FROM tasks WHERE wave = ? ORDER BY timestamp DESC LIMIT 5
-        """, (wave,))
+            SELECT task_id, description, status FROM tasks
+            WHERE wave = ? AND run_id IS ? ORDER BY timestamp DESC LIMIT 5
+        """, (wave, self.run_id))
         recent = cursor.fetchall()
 
         cursor.execute("""
-            SELECT COUNT(*), SUM(cost_usd) FROM tasks WHERE status = 'done'
-        """)
+            SELECT COUNT(*), SUM(cost_usd) FROM tasks WHERE status = 'done' AND run_id IS ?
+        """, (self.run_id,))
         total_done_count, total_cost_all = cursor.fetchone()
         conn.close()
 
@@ -447,8 +527,8 @@ class StateManager:
         conn = self._connect()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT task_id, description, status, result FROM tasks WHERE wave = ?
-        """, (wave,))
+            SELECT task_id, description, status, result FROM tasks WHERE wave = ? AND run_id IS ?
+        """, (wave, self.run_id))
         rows = cursor.fetchall()
         conn.close()
 
@@ -466,7 +546,7 @@ class StateManager:
         ])
 
     def get_full_run_summary(self) -> Dict[str, Any]:
-        """Cross-wave view of the entire run: every task's full detail plus
+        """Cross-wave view of the current run: every task's full detail plus
         aggregates, for the final report (get_wave_summary only scopes to one
         wave and two narrow cumulative numbers - not enough on its own)."""
         conn = self._connect()
@@ -475,13 +555,13 @@ class StateManager:
         cursor.execute("""
             SELECT task_id, status, description, result, cost_usd, verified,
                    verifier_output, wave, timestamp, ruflo_task_id, ruflo_agent_id, retry_count
-            FROM tasks ORDER BY wave ASC, timestamp ASC
-        """)
+            FROM tasks WHERE run_id IS ? ORDER BY wave ASC, timestamp ASC
+        """, (self.run_id,))
         rows = cursor.fetchall()
 
         cursor.execute("""
-            SELECT status, COUNT(*), SUM(cost_usd) FROM tasks GROUP BY status
-        """)
+            SELECT status, COUNT(*), SUM(cost_usd) FROM tasks WHERE run_id IS ? GROUP BY status
+        """, (self.run_id,))
         by_status = {r[0]: {'count': r[1], 'cost_usd': r[2] or 0.0} for r in cursor.fetchall()}
         conn.close()
 
@@ -520,12 +600,12 @@ class StateManager:
 
         query = """
             SELECT task_id, description, verifier_output, wave, retry_count, cost_usd
-            FROM tasks WHERE status = 'failed'
+            FROM tasks WHERE status = 'failed' AND run_id IS ?
         """
-        params: tuple = ()
+        params: tuple = (self.run_id,)
         if min_retry_count is not None:
             query += " AND retry_count >= ?"
-            params = (min_retry_count,)
+            params = params + (min_retry_count,)
         query += " ORDER BY wave DESC, timestamp DESC"
 
         cursor.execute(query, params)
@@ -565,10 +645,11 @@ class StateManager:
                 'finished_at': run_row[5], 'total_cost_usd': run_row[6] or 0.0,
             }
 
+        dashboard_run_id = run['run_id'] if run else None
         cursor.execute("""
             SELECT task_id, status, description, result, cost_usd, verified, wave, retry_count
-            FROM tasks ORDER BY wave ASC, task_id ASC
-        """)
+            FROM tasks WHERE run_id IS ? ORDER BY wave ASC, task_id ASC
+        """, (dashboard_run_id,))
         tasks = [
             {
                 'task_id': r[0], 'status': r[1], 'description': r[2],

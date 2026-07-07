@@ -16,10 +16,15 @@ StatusCallback = Callable[[str, int, str, str, Optional[str]], None]
 
 class TaskExecutor:
     def __init__(self, working_dir: str = ".", brain: Optional[Brain] = None,
-                 status_cb: Optional[StatusCallback] = None):
+                 status_cb: Optional[StatusCallback] = None, prior_context: str = ""):
         self.working_dir = working_dir
         self.brain = brain
         self.status_cb = status_cb or (lambda *args: None)
+        # Summary of the most recent completed run in this project, if any -
+        # injected into wave-1 prompts since those tasks have no in-DAG
+        # dependency to pull context from otherwise. Set by main.py after
+        # querying state.get_last_completed_run_context().
+        self.prior_context = prior_context
 
     def execute(self, task: TaskNode, wave_num: int = 0) -> Dict[str, Any]:
         """Execute a single task via Claude Code CLI headlessly."""
@@ -156,6 +161,10 @@ class TaskExecutor:
             if context_lines:
                 context_section = "\n\nContext from prior tasks:\n" + "\n".join(context_lines)
 
+        prior_run_section = ""
+        if wave_num == 1 and self.prior_context:
+            prior_run_section = f"\n\n{self.prior_context}"
+
         wave_context_section = ""
         if wave_num > 1 and self.brain:
             wave_summary = self.brain.memory_retrieve(f"wave_{wave_num - 1}_summary")
@@ -183,7 +192,7 @@ class TaskExecutor:
 
 Task: {task.description}
 
-Boundaries: {boundaries}{context_section}{wave_context_section}{retry_section}
+Boundaries: {boundaries}{prior_run_section}{context_section}{wave_context_section}{retry_section}
 
 Instructions:
 - Execute this task completely and correctly
