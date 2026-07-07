@@ -96,6 +96,12 @@
     border: 1px solid var(--hairline); color: var(--muted);
   }
   .chip.dep-done { color: var(--good-text); }
+  .confidence { font-size: 11px; padding: 1px 8px; border-radius: 999px; font-weight: 600; }
+  .conf-high { color: var(--good-text); border: 1px solid var(--good-text); }
+  .conf-mid  { color: var(--warning); border: 1px solid var(--warning); }
+  .conf-low  { color: var(--critical); border: 1px solid var(--critical); }
+  .reasoning { font-size: 12px; color: var(--critical); margin-top: 6px; padding: 6px 8px;
+               border-left: 2px solid var(--critical); background: rgba(208,59,59,0.06); }
   .status { font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
   .st-done      { color: var(--good-text); }
   .st-running   { color: var(--accent); }
@@ -170,6 +176,7 @@
 <section class="panel" style="padding:0; border:none; background:none;">
   <h2 style="margin:0 0 8px 2px;">Live log</h2>
   <div id="log"></div>
+
 </section>
 
 <footer>Meridian orchestrator — goal → DAG → parallel waves → independent verification. State read live from the project's <code>.meridian/</code> brain.</footer>
@@ -219,6 +226,7 @@ function render(data) {
   $('t-wave').textContent = waves.length ? Math.max(...waves) : '–';
   $('t-wave-s').textContent = runner.running ? 'in progress' : (run ? 'final' : '');
 
+
   const doneCount = dag.filter(n => n.status === 'done').length;
   $('t-tasks').textContent = dag.length ? `${doneCount}/${dag.length}` : '–';
   $('t-tasks-s').textContent = dag.length ? 'done / total' : '';
@@ -231,6 +239,18 @@ function render(data) {
   let cost = 0; (data.tasks || []).forEach(t => cost += (t.cost_usd || 0));
   $('t-cost').textContent = '$' + cost.toFixed(4);
 
+  const confidence = data.task_confidence || {};
+  const reasoning = data.reasoning || [];
+  const latestReasoningByTask = {};
+  reasoning.forEach(r => { if (!latestReasoningByTask[r.task_id]) latestReasoningByTask[r.task_id] = r; });
+
+  function confidenceBadge(taskId) {
+    const c = confidence[taskId];
+    if (!c || c.score === 0) return '';
+    const cls = c.score >= 0.8 ? 'conf-high' : c.score >= 0.5 ? 'conf-mid' : 'conf-low';
+    return `<span class="confidence ${cls}" title="${esc(c.rationale || '')}">confidence ${(c.score * 100).toFixed(0)}%</span>`;
+  }
+
   if (dag.length) {
     $('dag').innerHTML = dag.map(n => {
       const t = tasksById[n.id];
@@ -242,10 +262,14 @@ function render(data) {
       const extra = t ? `<span class="chip">wave ${t.wave}</span>` +
         (t.retry_count ? `<span class="chip">retries: ${t.retry_count}</span>` : '') +
         `<span class="chip">$${(t.cost_usd || 0).toFixed(3)}</span>` : '';
+      const reason = (n.status === 'failed' || n.status === 'ready') && latestReasoningByTask[n.id]
+        ? `<div class="reasoning">${esc(latestReasoningByTask[n.id].failure_type)}: ${esc(latestReasoningByTask[n.id].diagnostic_message).slice(0, 240)}</div>`
+        : '';
       return `<div class="task">
-        <div class="row1"><span class="tid">${esc(n.id)}</span>${statusSpan(n.status, live)}</div>
+        <div class="row1"><span class="tid">${esc(n.id)}</span>${statusSpan(n.status, live)}${confidenceBadge(n.id)}</div>
         <div class="desc">${esc(n.description)}</div>
         <div class="meta">${deps}${extra}</div>
+        ${reason}
       </div>`;
     }).join('');
   }

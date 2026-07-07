@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from dag import TaskNode, TaskStatus
 from state import StateManager
+from confidence import compute_all_confidences
 
 DOC_GLOB_PATTERNS = ("*.md", "*.rst")
 
@@ -30,12 +31,19 @@ def generate_final_report(
     skipped_ids = [tid for tid, node in dag.items() if node.status == TaskStatus.SKIPPED]
 
     confidence = _compute_confidence(dag, done_tasks, len(tasks), stalled, stall_reason)
+    dag_nodes = [
+        {'id': n.id, 'dependencies': n.dependencies, 'status': n.status.value,
+         'verify_commands': n.verify_commands}
+        for n in dag.values()
+    ]
+    task_confidence = compute_all_confidences(dag_nodes, tasks)
     documentation_files = _detect_new_doc_files(working_dir, start_time, start_commit)
     summary_text = _build_summary_text(dag, done_tasks, failed_tasks, skipped_ids, stalled, stall_reason)
 
     return {
         'summary_text': summary_text,
         'confidence': confidence,
+        'task_confidence': task_confidence,
         'test_results': {
             'total_verifications': len(tasks),
             'passed': len(done_tasks),

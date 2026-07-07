@@ -30,6 +30,7 @@ sys.path.insert(0, str(ORCHESTRATOR_DIR))
 
 from brain import Brain  # noqa: E402
 from state import StateManager  # noqa: E402
+from confidence import compute_all_confidences  # noqa: E402
 
 
 class Runner:
@@ -115,6 +116,7 @@ def make_handler(project_dir: Path, runner: Runner):
                 payload['swarm'] = brain.swarm_snapshot()
                 payload['runner'] = runner.status()
                 payload['project_dir'] = str(project_dir)
+                payload['task_confidence'] = compute_all_confidences(payload['dag'], payload['tasks'])
                 self._send_json(payload)
             else:
                 self._send(404, b"not found", "text/plain")
